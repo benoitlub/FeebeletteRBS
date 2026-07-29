@@ -1,42 +1,165 @@
-import { ScrollViewStyleReset } from "expo-router/html";
-import type { PropsWithChildren } from "react";
+import { SymIcon } from "@/components/SymIcon";
+import React from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Platform,
+} from "react-native";
+import { router } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
+import { useColors } from "@/hooks/useColors";
+import { SessionCard } from "@/components/SessionCard";
+import { SESSIONS } from "@/data/sessions";
+import { useApp } from "@/context/AppContext";
 
-export default function Root({ children }: PropsWithChildren) {
+function getRecommendedId(hour: number, profileId: string | null): string {
+  if (profileId) return profileId;
+  if (hour >= 21 || hour < 5) return "nid";
+  if (hour >= 5 && hour < 10) return "respiration";
+  if (hour >= 10 && hour < 18) return "reboot";
+  return "cristal";
+}
+
+export default function SessionsScreen() {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const { profile } = useApp();
+
+  const hour          = new Date().getHours();
+  const recommendedId = getRecommendedId(hour, profile.favoriteSessionId);
+  const recommended   = SESSIONS.find((s) => s.id === recommendedId);
+  const others        = SESSIONS.filter((s) => s.id !== recommendedId);
+
+  const topPad = Platform.OS === "web" ? 44 : insets.top;
+  const botPad = Platform.OS === "web" ? 34 : insets.bottom;
+
+  const heroColor = recommended?.colors[1] ?? "#1a0070";
+
   return (
-    <html lang="fr">
-      <head>
-        <meta charSet="utf-8" />
-        <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-        <meta
-          name="viewport"
-          content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+
+      {/* ── Hero header ── */}
+      <View style={[styles.heroWrap, { paddingTop: topPad }]}>
+        <LinearGradient
+          colors={[heroColor + "60", heroColor + "18", "transparent"] as [string, string, string]}
+          style={StyleSheet.absoluteFill}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
         />
-        <meta name="theme-color" content="#080810" />
-        <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <ScrollViewStyleReset />
-        <style dangerouslySetInnerHTML={{
-          __html: `
-            html, body, #root {
-              background-color: #080810 !important;
-              height: 100dvh !important;
-              max-height: 100dvh !important;
-              overflow: hidden;
-              margin: 0;
-              padding: 0;
-              overscroll-behavior: none;
-              -webkit-tap-highlight-color: transparent;
-            }
-            body {
-              position: fixed;
-              width: 100%;
-            }
-            * { box-sizing: border-box; }
-          `
-        }} />
-      </head>
-      <body>{children}</body>
-    </html>
+
+        {/* Back button */}
+        <Pressable
+          onPress={() => {
+            if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.back();
+          }}
+          style={styles.backBtn}
+          hitSlop={12}
+        >
+          <SymIcon name="chevron-back" size={22} color="#ffffff90" />
+        </Pressable>
+
+        {/* Title block */}
+        <View style={styles.heroContent}>
+          <Text style={styles.heroEye}>— RITUELS BIOADAPTIFS —</Text>
+          <Text style={styles.heroTitle}>Choisissez{"\n"}votre état.</Text>
+          <Text style={[styles.heroSub, { color: heroColor }]}>
+            {SESSIONS.length} séances  ·  binaural  ·  respiratoire
+          </Text>
+        </View>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={[styles.list, { paddingBottom: botPad + 30 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Recommended */}
+        {recommended && (
+          <>
+            <Text style={[styles.sectionEye, { color: heroColor }]}>★  Recommandé maintenant</Text>
+            <SessionCard
+              key={recommended.id}
+              session={recommended}
+              onPress={() => {
+                if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                router.push({ pathname: "/active", params: { id: recommended.id } });
+              }}
+              isRecommended
+            />
+          </>
+        )}
+
+        {/* All others */}
+        <Text style={styles.sectionEye}>Toutes les séances</Text>
+        {others.map((session) => (
+          <SessionCard
+            key={session.id}
+            session={session}
+            onPress={() => {
+              if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              router.push({ pathname: "/active", params: { id: session.id } });
+            }}
+          />
+        ))}
+      </ScrollView>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: { flex: 1 },
+
+  heroWrap: {
+    paddingBottom: 24,
+    paddingHorizontal: 20,
+    overflow: "hidden",
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+    marginLeft: -4,
+  },
+  heroContent: {
+    gap: 6,
+  },
+  heroEye: {
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 3,
+    color: "#ffffff35",
+    textTransform: "uppercase",
+  },
+  heroTitle: {
+    fontSize: 34,
+    fontWeight: "700",
+    letterSpacing: -0.5,
+    color: "#ffffffee",
+    lineHeight: 40,
+  },
+  heroSub: {
+    fontSize: 11,
+    letterSpacing: 0.6,
+    marginTop: 2,
+  },
+
+  list: { paddingTop: 8 },
+
+  sectionEye: {
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 2,
+    color: "#ffffff30",
+    textTransform: "uppercase",
+    marginHorizontal: 22,
+    marginBottom: 10,
+    marginTop: 20,
+  },
+});

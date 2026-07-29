@@ -1,262 +1,450 @@
 import { SymIcon } from "@/components/SymIcon";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
-  Image,
   StyleSheet,
   Pressable,
-  TextInput,
   ScrollView,
+  Linking,
   Platform,
+  Dimensions,
 } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import Animated, {
+  useSharedValue,
+  withTiming,
+  withRepeat,
+  Easing,
+  useAnimatedStyle,
+  interpolate,
+} from "react-native-reanimated";
+import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useColors } from "@/hooks/useColors";
-import { useApp } from "@/context/AppContext";
-import { getSession } from "@/data/sessions";
+import { useSubscription, MAX_FREE } from "@/context/SubscriptionContext";
 import { useLanguage } from "@/context/LanguageContext";
 
-// ── Brand assets ───────────────────────────────────────────────────────────────
-const FAIRY_IMG = require("../assets/images/fairy.png");
-const BUBBLE_IMGS: Record<string, number> = {
-  respiration: require("../assets/images/bubble_lotus.png") as number,
-  nid:         require("../assets/images/bubble_moon.png") as number,
-  cristal:     require("../assets/images/bubble_star.png") as number,
-  reboot:      require("../assets/images/bubble_wave.png") as number,
-  etincelle:   require("../assets/images/bubble_feather.png") as number,
-};
+const { width } = Dimensions.get("window");
 
-export default function JournalScreen() {
+const FAIRY_IMG = require("../assets/images/fairy.png");
+const FAIRY_SIZE = Math.round(width * 0.52);
+
+const PAYPAL_URL = "https://www.paypal.com/billing/subscriptions/create?plan_id=BLACKLACE_FBRS_690";
+
+export default function PaywallScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { t } = useLanguage();
-  const { id, elapsed } = useLocalSearchParams<{ id: string; elapsed?: string }>();
-  const { addRecord } = useApp();
+  const { freeSessionsLeft, activatePremium, isPremium } = useSubscription();
+  const [loading, setLoading] = useState(false);
 
-  const session = getSession(id ?? "ancrage");
+  const FEATURES = [
+    { icon: "infinite-outline", label: t.paywallUnlimited, premium: true },
+    { icon: "headset-outline", label: t.paywallAllWaves, premium: true },
+    { icon: "analytics-outline", label: t.paywallHistory, premium: true },
+    { icon: "hardware-chip-outline", label: t.paywallSensors, premium: true },
+    { icon: "flashlight-outline", label: t.paywallFlash, premium: true },
+    { icon: "leaf-outline", label: t.paywallFreeLabel, premium: false },
+  ];
+  const glow = useSharedValue(0);
+  const shimmer = useSharedValue(0);
+  const float = useSharedValue(0);
 
-  const [rating, setRating] = useState(0);
-  const [note, setNote] = useState("");
-  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    glow.value = withRepeat(
+      withTiming(1, { duration: 2500, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      true
+    );
+    shimmer.value = withRepeat(
+      withTiming(1, { duration: 1800, easing: Easing.linear }),
+      -1,
+      false
+    );
+    float.value = withRepeat(
+      withTiming(1, { duration: 3200, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      true
+    );
+  }, []);
+
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(glow.value, [0, 1], [0.3, 0.8]),
+    transform: [{ scale: interpolate(glow.value, [0, 1], [0.95, 1.05]) }],
+  }));
+
+  const fairyFloatStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: interpolate(float.value, [0, 1], [-6, 6]) },
+    ],
+  }));
+
+  const shimmerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: interpolate(shimmer.value, [0, 1], [-width, width]) }],
+  }));
 
   const topPadding = Platform.OS === "web" ? 67 : insets.top;
   const bottomPadding = Platform.OS === "web" ? 34 : insets.bottom;
 
-  const handleRate = (val: number) => {
-    setRating(val);
-    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
-
-  const handleSave = async () => {
-    if (!session) { router.replace("/"); return; }
-    const hour = new Date().getHours();
-    const timeOfDay =
-      hour >= 5 && hour < 12 ? "morning"
-      : hour >= 12 && hour < 17 ? "afternoon"
-      : hour >= 17 && hour < 21 ? "evening"
-      : "night";
-
-    const actualDuration = elapsed ? Math.max(10, parseInt(elapsed)) : session.duration;
-    await addRecord({
-      id: `${Date.now().toString()}-${Math.random().toString(36).substr(2, 9)}`,
-      sessionId: session.id,
-      sessionName: session.name,
-      completedAt: Date.now(),
-      duration: actualDuration,
-      rating,
-      note,
-      timeOfDay,
-      intensity: 0.7,
-    });
-
+  const handlePayPal = async () => {
     if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setSaved(true);
-    setTimeout(() => router.replace("/"), 1200);
+    setLoading(true);
+    try {
+      const can = await Linking.canOpenURL(PAYPAL_URL);
+      if (can) {
+        await Linking.openURL(PAYPAL_URL);
+      }
+    } catch (_) {}
+    setLoading(false);
   };
 
-  const waveColor =
-    session?.waveType === "delta" ? colors.secondary
-    : session?.waveType === "theta" ? "#9c6dff"
-    : colors.primary;
-
-  const ratingLabels = [t.ratingHard, t.ratingOk, t.ratingGood, t.ratingVeryGood, t.ratingExcellent];
+  const handleFreeContinue = () => {
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.back();
+  };
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <LinearGradient
-        colors={[session?.colors[0] + "40" ?? "#08001e40", colors.background] as [string, string]}
+        colors={["#120030", "#080010", colors.background]}
         style={StyleSheet.absoluteFill}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 0.6 }}
       />
 
-      <ScrollView
-        contentContainerStyle={[styles.content, { paddingTop: topPadding + 20, paddingBottom: bottomPadding + 40 }]}
-        keyboardShouldPersistTaps="handled"
-        style={{ backgroundColor: "transparent" }}
-      >
-        {/* ── En-tête fée + bulle de séance ── */}
-        <View style={styles.heroHeader}>
-          {/* Fée belette silhouette */}
-          <Image
+      <View style={[styles.header, { paddingTop: topPadding + 8 }]}>
+        {/* Top row: close button + label */}
+        <View style={styles.headerRow}>
+          <Pressable
+            onPress={() => {
+              if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.back();
+            }}
+            style={styles.closeBtn}
+          >
+            <SymIcon name="close" size={22} color={colors.mutedForeground} />
+          </Pressable>
+          <Text style={[styles.headerLabel, { color: colors.mutedForeground }]}>
+            {t.paywallSub}
+          </Text>
+        </View>
+
+        {/* Fairy centered in header */}
+        <View style={styles.fairyContainer}>
+          <Animated.View style={[styles.fairyGlow, glowStyle]}>
+            <LinearGradient
+              colors={["#7c4dff60", "#00e5ff30"]}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
+          <Animated.Image
             source={FAIRY_IMG}
-            style={styles.headerFairy}
+            style={[styles.fairyImg, fairyFloatStyle]}
             resizeMode="contain"
           />
-          {/* Bulle de séance en médaillon */}
-          {session && BUBBLE_IMGS[session.id] && (
-            <View style={[styles.bubbleMedallion, { borderColor: waveColor + "40", backgroundColor: waveColor + "10" }]}>
-              <Image
-                source={BUBBLE_IMGS[session.id]}
-                style={styles.bubbleMedallionImg}
-                resizeMode="contain"
-              />
-            </View>
-          )}
-          <View style={styles.headerText}>
-            {/* Symbole felbeletien */}
-            <Text style={[styles.felbeletienMark, { color: waveColor + "70" }]}>
-              {t.journalBrand}
-            </Text>
-            <Text style={[styles.completedLabel, { color: colors.mutedForeground }]}>
-              {t.journalSessionDone}{session?.name ?? "—"}
-            </Text>
-            <Text style={[styles.sessionNameText, { color: colors.foreground }]}>
-              {t.howDoYouFeel}
-            </Text>
-            <Text style={[styles.fairyClose, { color: waveColor + "aa" }]}>
-              "{t.journalTagline}"
-            </Text>
-            {/* Symbole feuchien — état apaisé */}
-            <Text style={[styles.feuchienMark, { color: waveColor + "45" }]}>
-              {t.journalFeuchien}
-            </Text>
-          </View>
+        </View>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: bottomPadding + 40 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.titleBlock}>
+          <Text style={[styles.eyebrow, { color: colors.secondary }]}>
+            FÉE BELETTE PREMIUM
+          </Text>
+          <Text style={[styles.title, { color: colors.foreground }]}>
+            {t.paywallTitle}
+          </Text>
+          <Text style={[styles.sessionCounter, { color: colors.mutedForeground }]}>
+            {freeSessionsLeft} {t.paywallFree}
+          </Text>
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.cardTitle, { color: colors.foreground }]}>{t.howDoYouFeel}</Text>
-          <View style={styles.ratingRow}>
-            {[1, 2, 3, 4, 5].map((val) => (
-              <Pressable key={val} onPress={() => handleRate(val)} style={styles.starBtn}>
-                <SymIcon
-                  name={rating >= val ? "star" : "star-outline"}
-                  size={32}
-                  color={rating >= val ? waveColor : colors.mutedForeground}
-                />
-              </Pressable>
-            ))}
-          </View>
-          {rating > 0 && (
-            <Text style={[styles.ratingLabel, { color: colors.mutedForeground }]}>
-              {ratingLabels[rating - 1]}
-            </Text>
-          )}
+        <View style={styles.freeBar}>
+          {[...Array(MAX_FREE)].map((_, i) => (
+            <View
+              key={i}
+              style={[
+                styles.freeBarDot,
+                {
+                  backgroundColor:
+                    i < MAX_FREE - freeSessionsLeft
+                      ? colors.secondary + "60"
+                      : colors.secondary,
+                },
+              ]}
+            />
+          ))}
+          <Text style={[styles.freeBarLabel, { color: colors.mutedForeground }]}>
+            {MAX_FREE - freeSessionsLeft} / {MAX_FREE}
+          </Text>
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.cardTitle, { color: colors.foreground }]}>{t.reflection}</Text>
-          <TextInput
-            style={[styles.noteInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.muted }]}
-            placeholder={t.notesPlaceholder}
-            placeholderTextColor={colors.mutedForeground}
-            value={note}
-            onChangeText={setNote}
-            multiline
-            numberOfLines={4}
-            textAlignVertical="top"
+        <View style={[styles.priceCard, { borderColor: colors.secondary + "50" }]}>
+          <LinearGradient
+            colors={["#7c4dff15", "#00e5ff08"]}
+            style={[StyleSheet.absoluteFill, { borderRadius: 24 }]}
           />
+          <View style={styles.priceRow}>
+            <Text style={[styles.price, { color: colors.foreground }]}>6,90€</Text>
+            <View>
+              <Text style={[styles.pricePeriod, { color: colors.mutedForeground }]}>/ mois</Text>
+              <Text style={[styles.priceSub, { color: colors.mutedForeground }]}>
+                Sans engagement
+              </Text>
+            </View>
+          </View>
+
+          {FEATURES.map((f) => (
+            <View key={f.label} style={styles.featureRow}>
+              <View
+                style={[
+                  styles.featureIcon,
+                  {
+                    backgroundColor: f.premium
+                      ? colors.secondary + "15"
+                      : colors.muted,
+                  },
+                ]}
+              >
+                <SymIcon
+                  name={f.icon as any}
+                  size={14}
+                  color={f.premium ? colors.secondary : colors.mutedForeground}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.featureLabel,
+                  { color: f.premium ? colors.foreground : colors.mutedForeground },
+                ]}
+              >
+                {f.label}
+              </Text>
+              {f.premium && (
+                <SymIcon name="checkmark" size={14} color={colors.accent} />
+              )}
+            </View>
+          ))}
         </View>
 
         <Pressable
-          onPress={handleSave}
-          style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] }]}
+          onPress={handlePayPal}
+          disabled={loading}
+          style={({ pressed }) => [
+            styles.paypalBtn,
+            pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },
+          ]}
         >
-          <LinearGradient
-            colors={[waveColor, colors.secondary] as [string, string]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.saveBtnGradient}
-          >
-            {saved ? (
-              <SymIcon name="checkmark" size={22} color={colors.background} />
-            ) : (
-              <>
-                <SymIcon name="sparkles" size={18} color={colors.background} />
-                <Text style={[styles.saveBtnText, { color: colors.background }]}>{t.journalReturnBtn}</Text>
-              </>
-            )}
-          </LinearGradient>
+          <View style={styles.paypalInner}>
+            <View style={styles.shimmerContainer}>
+              <Animated.View style={[styles.shimmer, shimmerStyle]}>
+                <LinearGradient
+                  colors={["transparent", "#ffffff20", "transparent"]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={StyleSheet.absoluteFill}
+                />
+              </Animated.View>
+            </View>
+            <Text style={styles.paypalLogo}>
+              Pay<Text style={{ fontStyle: "italic", color: "#009cde" }}>Pal</Text>
+            </Text>
+            <Text style={styles.paypalLabel}>
+              {loading ? "…" : t.paywallCta}
+            </Text>
+          </View>
         </Pressable>
 
-        <Pressable onPress={() => router.replace("/")} style={styles.skipBtn}>
-          <Text style={[styles.skipText, { color: colors.mutedForeground }]}>{t.skip}</Text>
-        </Pressable>
+        <Text style={[styles.legal, { color: colors.mutedForeground }]}>
+          {t.paywallLegal}
+        </Text>
+
+        {freeSessionsLeft > 0 && (
+          <Pressable onPress={handleFreeContinue} style={styles.freeBtn}>
+            <Text style={[styles.freeBtnText, { color: colors.mutedForeground }]}>
+              {freeSessionsLeft} {t.paywallFree}
+            </Text>
+          </Pressable>
+        )}
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  content: { paddingHorizontal: 24, gap: 16 },
-
-  /* ── Completion hero ── */
-  heroHeader: {
+  screen: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    paddingHorizontal: 20,
+    paddingBottom: 0,
+  },
+  headerRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 14,
-    marginBottom: 8,
+    alignItems: "center",
+    paddingBottom: 4,
   },
-  headerFairy: {
-    width: 70,
-    height: 95,
-    opacity: 0.85,
-    flexShrink: 0,
+  closeBtn: {
+    padding: 6,
+    marginRight: 12,
   },
-  bubbleMedallion: {
-    position: "absolute",
-    left: 44,
-    top: 52,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
+  headerLabel: {
+    fontSize: 13,
+    letterSpacing: 1,
+  },
+  fairyContainer: {
     alignItems: "center",
     justifyContent: "center",
+    height: FAIRY_SIZE * 0.75,
+    marginTop: -8,
+  },
+  fairyGlow: {
+    position: "absolute",
+    width: FAIRY_SIZE * 0.8,
+    height: FAIRY_SIZE * 0.8,
+    borderRadius: FAIRY_SIZE * 0.4,
     overflow: "hidden",
   },
-  bubbleMedallionImg: { width: 28, height: 28 },
-  headerText: { flex: 1, gap: 3 },
-  felbeletienMark: {
-    fontSize: 8, fontWeight: "800", letterSpacing: 3,
-    textTransform: "uppercase", marginBottom: 2,
+  fairyImg: {
+    width: FAIRY_SIZE,
+    height: FAIRY_SIZE,
   },
-  feuchienMark: {
-    fontSize: 8, fontWeight: "600", letterSpacing: 3,
-    textTransform: "uppercase", marginTop: 6,
+  content: {
+    paddingHorizontal: 24,
+    alignItems: "center",
+    gap: 20,
   },
-  completedLabel: { fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase" },
-  sessionNameText: { fontSize: 20, fontWeight: "700", marginTop: 2, marginBottom: 4 },
-  fairyClose: { fontSize: 12, fontStyle: "italic", letterSpacing: 0.2, lineHeight: 18 },
-  card: { borderRadius: 20, borderWidth: 1, padding: 20, gap: 16 },
-  cardTitle: { fontSize: 16, fontWeight: "500", letterSpacing: 0.3 },
-  ratingRow: { flexDirection: "row", gap: 8 },
-  starBtn: { padding: 4 },
-  ratingLabel: { fontSize: 13, letterSpacing: 1, textTransform: "uppercase" },
-  noteInput: {
-    borderRadius: 12, borderWidth: 1, padding: 14,
-    fontSize: 14, lineHeight: 22, minHeight: 100,
+  titleBlock: {
+    alignItems: "center",
+    gap: 8,
   },
-  saveBtn: { borderRadius: 18, overflow: "hidden", marginTop: 8 },
-  saveBtnGradient: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    paddingVertical: 18, gap: 10,
+  eyebrow: {
+    fontSize: 11,
+    letterSpacing: 3,
+    textTransform: "uppercase",
   },
-  saveBtnText: { fontSize: 17, fontWeight: "600", letterSpacing: 0.5 },
-  skipBtn: { alignItems: "center", padding: 12 },
-  skipText: { fontSize: 13, letterSpacing: 0.5 },
+  title: {
+    fontSize: 32,
+    fontWeight: "700",
+    letterSpacing: 1,
+    textAlign: "center",
+    lineHeight: 40,
+  },
+  sessionCounter: {
+    fontSize: 13,
+    textAlign: "center",
+    letterSpacing: 0.3,
+  },
+  freeBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  freeBarDot: {
+    width: 28,
+    height: 8,
+    borderRadius: 4,
+  },
+  freeBarLabel: {
+    fontSize: 11,
+    letterSpacing: 0.5,
+    marginLeft: 4,
+  },
+  priceCard: {
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 24,
+    gap: 16,
+    overflow: "hidden",
+  },
+  priceRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 12,
+    marginBottom: 8,
+  },
+  price: {
+    fontSize: 48,
+    fontWeight: "700",
+    letterSpacing: -1,
+  },
+  pricePeriod: {
+    fontSize: 16,
+    letterSpacing: 0.3,
+  },
+  priceSub: {
+    fontSize: 11,
+    letterSpacing: 0.5,
+  },
+  featureRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  featureIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  featureLabel: {
+    flex: 1,
+    fontSize: 13,
+    letterSpacing: 0.3,
+  },
+  paypalBtn: {
+    width: "100%",
+    borderRadius: 18,
+    overflow: "hidden",
+    backgroundColor: "#0070ba",
+  },
+  paypalInner: {
+    paddingVertical: 18,
+    alignItems: "center",
+    gap: 4,
+    overflow: "hidden",
+  },
+  shimmerContainer: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: "hidden",
+  },
+  shimmer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  paypalLogo: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#ffffff",
+    letterSpacing: -0.5,
+  },
+  paypalLabel: {
+    fontSize: 13,
+    color: "#ffffffcc",
+    letterSpacing: 0.5,
+  },
+  legal: {
+    fontSize: 11,
+    textAlign: "center",
+    letterSpacing: 0.3,
+    lineHeight: 16,
+  },
+  freeBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+  },
+  freeBtnText: {
+    fontSize: 13,
+    letterSpacing: 0.5,
+  },
 });

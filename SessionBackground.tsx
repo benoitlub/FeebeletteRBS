@@ -1,278 +1,182 @@
-import { reloadAppAsync } from "expo";
 import { SymIcon } from "@/components/SymIcon";
 import React, { useState } from "react";
 import {
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
   View,
+  Text,
+  StyleSheet,
+  Pressable,
+  Modal,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-
+import { LinearGradient } from "expo-linear-gradient";
 import { useColors } from "@/hooks/useColors";
+import { useLanguage, LANGS, LangCode } from "@/context/LanguageContext";
+import Animated, {
+  useSharedValue,
+  withTiming,
+  useAnimatedStyle,
+  Easing,
+} from "react-native-reanimated";
 
-export type ErrorFallbackProps = {
-  error: Error;
-  resetError: () => void;
-};
-
-export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
+export function LanguagePicker() {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
+  const { lang, setLang, t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const scale = useSharedValue(1);
+  const current = LANGS.find((l) => l.code === lang)!;
 
-  const [isModalVisible, setIsModalVisible] = useState(false);
+  const pressIn = () => { scale.value = withTiming(0.93, { duration: 80 }); };
+  const pressOut = () => { scale.value = withTiming(1, { duration: 120 }); };
 
-  const handleRestart = async () => {
-    try {
-      await reloadAppAsync();
-    } catch (restartError) {
-      console.error("Failed to restart app:", restartError);
-      resetError();
-    }
+  const btnStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  const handleSelect = (code: LangCode) => {
+    setLang(code);
+    setOpen(false);
   };
-
-  const formatErrorDetails = (): string => {
-    let details = `Error: ${error.message}\n\n`;
-    if (error.stack) {
-      details += `Stack Trace:\n${error.stack}`;
-    }
-    return details;
-  };
-
-  const monoFont = Platform.select({
-    ios: "Menlo",
-    android: "monospace",
-    default: "monospace",
-  });
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {__DEV__ ? (
+    <>
+      <Animated.View style={btnStyle}>
         <Pressable
-          onPress={() => setIsModalVisible(true)}
-          accessibilityLabel="View error details"
-          accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.topButton,
-            {
-              top: insets.top + 16,
-              backgroundColor: colors.card,
-              opacity: pressed ? 0.8 : 1,
-            },
-          ]}
+          onPress={() => setOpen(true)}
+          onPressIn={pressIn}
+          onPressOut={pressOut}
+          style={[styles.pill, { backgroundColor: colors.card, borderColor: colors.border }]}
         >
-          <SymIcon name="alert-circle" size={20} color={colors.foreground} />
-        </Pressable>
-      ) : null}
-
-      <View style={styles.content}>
-        <Text style={[styles.title, { color: colors.foreground }]}>
-          Something went wrong
-        </Text>
-
-        <Text style={[styles.message, { color: colors.mutedForeground }]}>
-          Please reload the app to continue.
-        </Text>
-
-        <Pressable
-          onPress={handleRestart}
-          style={({ pressed }) => [
-            styles.button,
-            {
-              backgroundColor: colors.primary,
-              opacity: pressed ? 0.9 : 1,
-              transform: [{ scale: pressed ? 0.98 : 1 }],
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.buttonText,
-              { color: colors.primaryForeground },
-            ]}
-          >
-            Try Again
+          <Text style={styles.flag}>{current.flag}</Text>
+          <Text style={[styles.code, { color: colors.mutedForeground }]}>
+            {current.code.toUpperCase()}
           </Text>
+          <SymIcon name="chevron-down" size={9} color={colors.mutedForeground} />
         </Pressable>
-      </View>
+      </Animated.View>
 
-      {__DEV__ ? (
-        <Modal
-          visible={isModalVisible}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setIsModalVisible(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View
-              style={[
-                styles.modalContainer,
-                { backgroundColor: colors.background },
-              ]}
-            >
-              <View
-                style={[
-                  styles.modalHeader,
-                  { borderBottomColor: colors.border },
-                ]}
-              >
-                <Text style={[styles.modalTitle, { color: colors.foreground }]}>
-                  Error Details
+      <Modal
+        visible={open}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setOpen(false)}
+      >
+        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
+          <Pressable onPress={(e) => e.stopPropagation()}>
+            <View style={[styles.sheet, { backgroundColor: colors.card, borderColor: colors.secondary + "35" }]}>
+              <LinearGradient
+                colors={[colors.secondary + "12", "transparent"]}
+                style={[StyleSheet.absoluteFill, { borderRadius: 20 }]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+              />
+
+              <View style={styles.sheetHeader}>
+                <Text style={styles.globe}>🌐</Text>
+                <Text style={[styles.sheetTitle, { color: colors.foreground }]}>
+                  {t.chooseLang}
                 </Text>
-                <Pressable
-                  onPress={() => setIsModalVisible(false)}
-                  accessibilityLabel="Close error details"
-                  accessibilityRole="button"
-                  style={({ pressed }) => [
-                    styles.closeButton,
-                    { opacity: pressed ? 0.6 : 1 },
-                  ]}
-                >
-                  <SymIcon name="x" size={24} color={colors.foreground} />
-                </Pressable>
               </View>
 
-              <ScrollView
-                style={styles.modalScrollView}
-                contentContainerStyle={[
-                  styles.modalScrollContent,
-                  { paddingBottom: insets.bottom + 16 },
-                ]}
-                showsVerticalScrollIndicator
-              >
-                <View
-                  style={[
-                    styles.errorContainer,
-                    { backgroundColor: colors.card },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.errorText,
+              {LANGS.map((item) => {
+                const isActive = item.code === lang;
+                return (
+                  <Pressable
+                    key={item.code}
+                    onPress={() => handleSelect(item.code)}
+                    style={({ pressed }) => [
+                      styles.langRow,
                       {
-                        color: colors.foreground,
-                        fontFamily: monoFont,
+                        borderColor: isActive ? colors.primary + "50" : colors.border,
+                        backgroundColor: isActive
+                          ? colors.primary + "10"
+                          : pressed
+                          ? colors.muted
+                          : "transparent",
                       },
                     ]}
-                    selectable
                   >
-                    {formatErrorDetails()}
-                  </Text>
-                </View>
-              </ScrollView>
+                    <Text style={styles.langFlag}>{item.flag}</Text>
+                    <Text style={[styles.langName, { color: isActive ? colors.primary : colors.foreground }]}>
+                      {item.name}
+                    </Text>
+                    {isActive && (
+                      <SymIcon name="checkmark-circle" size={16} color={colors.primary} />
+                    )}
+                  </Pressable>
+                );
+              })}
             </View>
-          </View>
-        </Modal>
-      ) : null}
-    </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    width: "100%",
-    height: "100%",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
-  content: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 16,
-    width: "100%",
-    maxWidth: 600,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-    textAlign: "center",
-    lineHeight: 40,
-  },
-  message: {
-    fontSize: 16,
-    textAlign: "center",
-    lineHeight: 24,
-  },
-  topButton: {
-    position: "absolute",
-    right: 16,
-    width: 44,
-    height: 44,
-    borderRadius: 8,
+  pill: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1,
   },
-  button: {
-    paddingVertical: 16,
-    borderRadius: 8,
-    paddingHorizontal: 24,
-    minWidth: 200,
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+  flag: {
+    fontSize: 13,
+    lineHeight: 15,
   },
-  buttonText: {
+  code: {
+    fontSize: 10,
     fontWeight: "600",
-    textAlign: "center",
-    fontSize: 16,
+    letterSpacing: 0.8,
   },
-  modalOverlay: {
+  backdrop: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end",
-  },
-  modalContainer: {
-    width: "100%",
-    height: "90%",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "600",
-  },
-  closeButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
+    backgroundColor: "#00000090",
     justifyContent: "center",
+    alignItems: "center",
+    padding: 32,
   },
-  modalScrollView: {
-    flex: 1,
-  },
-  modalScrollContent: {
-    padding: 16,
-  },
-  errorContainer: {
-    width: "100%",
-    borderRadius: 8,
+  sheet: {
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 20,
+    gap: 10,
+    width: 280,
     overflow: "hidden",
-    padding: 16,
   },
-  errorText: {
-    fontSize: 12,
-    lineHeight: 18,
-    width: "100%",
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 4,
+  },
+  globe: {
+    fontSize: 18,
+  },
+  sheetTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    letterSpacing: 0.5,
+  },
+  langRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+  },
+  langFlag: {
+    fontSize: 20,
+  },
+  langName: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "500",
+    letterSpacing: 0.3,
   },
 });

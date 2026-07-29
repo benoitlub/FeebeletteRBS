@@ -1,0 +1,15 @@
+import { Stack } from "expo-router";
+import React from "react";
+
+const DARK = "#080810";
+
+export default function HomeLayout() {
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: DARK },
+      }}
+    />
+  );
+}

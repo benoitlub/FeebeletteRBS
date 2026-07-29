@@ -1,33 +1,33 @@
 import React, { useEffect } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, Dimensions } from "react-native";
 import Animated, {
   useSharedValue,
   withTiming,
+  withDelay,
   Easing,
   useAnimatedStyle,
+  interpolate,
 } from "react-native-reanimated";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useColors } from "@/hooks/useColors";
 import { SessionRecord } from "@/types";
-import { SESSIONS } from "@/data/sessions";
 
-const WAVE_META = {
-  delta: { label: "Delta", sub: "0.5–4 Hz · Sommeil profond", color: "#7c4dff" },
-  theta: { label: "Thêta", sub: "4–8 Hz · Méditation", color: "#9c6dff" },
-  alpha: { label: "Alpha", sub: "8–14 Hz · Relaxation", color: "#00e5ff" },
-};
+const { width } = Dimensions.get("window");
+const MAX_ITEMS = 10;
 
-function AnimatedBar({ pct, color }: { pct: number; color: string }) {
-  const width = useSharedValue(0);
+function RatingDot({ rating, index, color }: { rating: number; index: number; color: string }) {
+  const scale = useSharedValue(0);
   useEffect(() => {
-    width.value = withTiming(pct, { duration: 900, easing: Easing.out(Easing.cubic) });
-  }, [pct]);
+    scale.value = withDelay(
+      index * 80,
+      withTiming(1, { duration: 400, easing: Easing.out(Easing.back(2)) })
+    );
+  }, []);
   const style = useAnimatedStyle(() => ({
-    width: `${width.value}%`,
+    transform: [{ scale: scale.value }],
   }));
   return (
-    <View style={[styles.barTrack]}>
-      <Animated.View style={[styles.bar, { backgroundColor: color }, style]} />
-    </View>
+    <Animated.View style={[styles.dot, { backgroundColor: color + (rating > 0 ? "ff" : "20") }, style]} />
   );
 }
 
@@ -35,49 +35,87 @@ interface Props {
   records: SessionRecord[];
 }
 
-export function WaveChart({ records }: Props) {
+export function RatingChart({ records }: Props) {
   const colors = useColors();
+  const recent = [...records].slice(0, MAX_ITEMS).reverse();
+  const avgRating =
+    recent.length > 0
+      ? recent.reduce((a, r) => a + r.rating, 0) / recent.length
+      : 0;
 
-  const counts: Record<string, number> = { delta: 0, theta: 0, alpha: 0 };
-  records.forEach((r) => {
-    const session = SESSIONS.find((s) => s.id === r.sessionId);
-    if (session) {
-      counts[session.waveType] = (counts[session.waveType] ?? 0) + 1;
-    }
-  });
-
-  const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+  const ratingColor = (r: number) =>
+    r >= 4 ? colors.accent : r >= 3 ? colors.amber : colors.secondary;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <Text style={[styles.title, { color: colors.foreground }]}>
-        Distribution des ondes
-      </Text>
-      <Text style={[styles.sub, { color: colors.mutedForeground }]}>
-        {total} séance{total !== 1 ? "s" : ""} analysée{total !== 1 ? "s" : ""}
-      </Text>
-
-      {Object.entries(WAVE_META).map(([key, meta]) => {
-        const count = counts[key] ?? 0;
-        const pct = Math.round((count / total) * 100);
-        return (
-          <View key={key} style={styles.row}>
-            <View style={styles.rowHeader}>
-              <View style={[styles.dot, { backgroundColor: meta.color }]} />
-              <View style={styles.rowLabels}>
-                <Text style={[styles.waveLabel, { color: colors.foreground }]}>
-                  {meta.label}
-                </Text>
-                <Text style={[styles.waveSub, { color: colors.mutedForeground }]}>
-                  {meta.sub}
-                </Text>
-              </View>
-              <Text style={[styles.pct, { color: meta.color }]}>{pct}%</Text>
-            </View>
-            <AnimatedBar pct={pct} color={meta.color} />
+      <View style={styles.header}>
+        <View>
+          <Text style={[styles.title, { color: colors.foreground }]}>
+            Tendance qualité
+          </Text>
+          <Text style={[styles.sub, { color: colors.mutedForeground }]}>
+            {recent.length} dernière{recent.length !== 1 ? "s" : ""} séance{recent.length !== 1 ? "s" : ""}
+          </Text>
+        </View>
+        <View style={styles.avgBlock}>
+          <Text style={[styles.avgNum, { color: colors.accent }]}>
+            {avgRating > 0 ? avgRating.toFixed(1) : "—"}
+          </Text>
+          <View style={styles.starsRow}>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Ionicons
+                key={i}
+                name={i <= Math.round(avgRating) ? "star" : "star-outline"}
+                size={10}
+                color={colors.amber}
+              />
+            ))}
           </View>
-        );
-      })}
+        </View>
+      </View>
+
+      {recent.length === 0 ? (
+        <Text style={[styles.empty, { color: colors.mutedForeground }]}>
+          Aucune séance enregistrée
+        </Text>
+      ) : (
+        <View style={styles.timeline}>
+          {recent.map((r, i) => {
+            const dotColor = ratingColor(r.rating);
+            const date = new Date(r.completedAt).toLocaleDateString("fr-FR", {
+              day: "numeric",
+              month: "short",
+            });
+            return (
+              <View key={r.id} style={styles.item}>
+                <View style={styles.dotsCol}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <RatingDot
+                      key={star}
+                      rating={r.rating >= star ? 1 : 0}
+                      index={i * 5 + star}
+                      color={dotColor}
+                    />
+                  ))}
+                </View>
+                <View style={styles.itemInfo}>
+                  <Text style={[styles.itemName, { color: colors.foreground }]} numberOfLines={1}>
+                    {r.sessionName}
+                  </Text>
+                  <Text style={[styles.itemDate, { color: colors.mutedForeground }]}>
+                    {date}
+                  </Text>
+                </View>
+                <View style={styles.durationBadge}>
+                  <Text style={[styles.durationText, { color: colors.mutedForeground }]}>
+                    {Math.floor(r.duration / 60)}m
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 }
@@ -89,6 +127,11 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 16,
   },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
   title: {
     fontSize: 14,
     fontWeight: "600",
@@ -97,49 +140,63 @@ const styles = StyleSheet.create({
   sub: {
     fontSize: 11,
     letterSpacing: 0.3,
-    marginTop: -10,
+    marginTop: 2,
   },
-  row: {
-    gap: 8,
+  avgBlock: {
+    alignItems: "center",
+    gap: 2,
   },
-  rowHeader: {
+  avgNum: {
+    fontSize: 22,
+    fontWeight: "700",
+    letterSpacing: -0.5,
+  },
+  starsRow: {
+    flexDirection: "row",
+    gap: 1,
+  },
+  empty: {
+    fontSize: 12,
+    textAlign: "center",
+    paddingVertical: 16,
+    letterSpacing: 0.3,
+  },
+  timeline: {
+    gap: 12,
+  },
+  item: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  dotsCol: {
+    flexDirection: "row",
+    gap: 2,
   },
-  rowLabels: {
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  itemInfo: {
     flex: 1,
     gap: 1,
   },
-  waveLabel: {
-    fontSize: 13,
+  itemName: {
+    fontSize: 12,
     fontWeight: "500",
     letterSpacing: 0.3,
   },
-  waveSub: {
+  itemDate: {
     fontSize: 10,
     letterSpacing: 0.3,
   },
-  pct: {
-    fontSize: 13,
-    fontWeight: "600",
-    letterSpacing: 0.5,
-    minWidth: 36,
-    textAlign: "right",
+  durationBadge: {
+    minWidth: 32,
+    alignItems: "flex-end",
   },
-  barTrack: {
-    height: 6,
-    backgroundColor: "#ffffff10",
-    borderRadius: 3,
-    overflow: "hidden",
-  },
-  bar: {
-    height: "100%",
-    borderRadius: 3,
+  durationText: {
+    fontSize: 11,
+    letterSpacing: 0.3,
   },
 });

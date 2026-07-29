@@ -1,217 +1,178 @@
-/**
- * useFlash — Luminothérapie thérapeutique avancée via torche LED.
- *
- * Modes scientifiques :
- *  "entrainment"  — Entraînement cérébral par fréquence (delta/theta/alpha/beta)
- *  "breath-sync"  — Torche synchronisée sur le cycle respiratoire
- *  "theta-burst"  — Rafales theta brèves (inspiré de la stimulation TMS)
- *  "schumann"     — Résonance de Schumann 7.83 Hz (ancrage terrestre)
- *  "pulse"        — Pulsation simple à fréquence fixe (mode par défaut)
- *
- * Compatible expo-camera v17.x / SDK 54.
- */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Platform } from "react-native";
 
-export type LightMode =
-  | "entrainment"
-  | "breath-sync"
-  | "theta-burst"
-  | "schumann"
-  | "pulse";
+const AMBIENT_VOLUME = 0.28;
+const FADE_STEPS     = 20;
+const FADE_INTERVAL  = 60; // ms per step → ~1.2s total fade
 
-export interface BreathPhase {
-  phase: "inhale" | "hold" | "exhale";
-  progress: number; // 0–1 within current phase
+export interface AmbientAudioState {
+  isReady:   boolean;
+  isPlaying: boolean;
+  isMuted:   boolean;
+  toggle:    () => void;
+  fadeIn:    () => void;
+  fadeOut:   (cb?: () => void) => void;
 }
 
-interface FlashConfig {
-  hz:          number;
-  enabled:     boolean;
-  intensity:   number;   // 0–1
-  mode?:       LightMode;
-  breathPhase?: BreathPhase;  // used by breath-sync mode
-  dutyCycle?:  number;   // 0–1, default 0.40
-}
+export function useAmbientAudio(enabled = true): AmbientAudioState {
+  const [isReady,   setIsReady]   = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted,   setIsMuted]   = useState(false);
 
-interface FlashControl {
-  torchOn:           boolean;
-  hasPermission:     boolean | null;
-  isActive:          boolean;
-  requestPermission: () => Promise<void>;
-  currentHz:         number;  // actual Hz being used (may differ from config.hz)
-}
-
-// Schumann resonance — frequency of Earth's electromagnetic field
-const SCHUMANN_HZ = 7.83;
-
-// Theta burst: 5 pulses at 50 Hz, then 200ms silence, repeat
-function useThetaBurst(
-  enabled: boolean,
-  hasPermission: boolean | null,
-  setTorchOn: (v: boolean) => void,
-  mounted: React.MutableRefObject<boolean>
-) {
-  const ref = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  function clear() {
-    if (ref.current) clearTimeout(ref.current);
-    ref.current = null;
-  }
+  const soundRef    = useRef<any>(null);
+  const isMutedRef  = useRef(false);   // toujours à jour, pas de stale closure
+  const isMounted   = useRef(true);
+  const fadeRef     = useRef<ReturnType<typeof setInterval> | null>(null);
+  const currentVol  = useRef(0);
 
   useEffect(() => {
-    clear();
-    if (!enabled || !hasPermission || Platform.OS === "web") {
-      setTorchOn(false);
-      return;
-    }
-
-    // 3 pulses at 50Hz within a burst, 800ms silence between bursts
-    const PULSE_ON  = 10;  // ms
-    const PULSE_OFF = 10;  // ms
-    const PULSES    = 3;
-    const BURST_GAP = 800; // ms between burst starts
-
-    function runBurst(n: number) {
-      if (!mounted.current || !enabled) { setTorchOn(false); return; }
-      if (n >= PULSES) {
-        setTorchOn(false);
-        ref.current = setTimeout(() => runBurst(0), BURST_GAP);
-        return;
-      }
-      setTorchOn(true);
-      ref.current = setTimeout(() => {
-        if (mounted.current) setTorchOn(false);
-        ref.current = setTimeout(() => runBurst(n + 1), PULSE_OFF);
-      }, PULSE_ON);
-    }
-
-    runBurst(0);
-    return clear;
-  }, [enabled, hasPermission]);
-}
-
-export function useFlash(config: FlashConfig): FlashControl {
-  const [torchOn,       setTorchOn]       = useState(false);
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const intervalRef    = useRef<ReturnType<typeof setInterval> | null>(null);
-  const offTimerRef    = useRef<ReturnType<typeof setTimeout>  | null>(null);
-  const mounted        = useRef(true);
-
-  useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; clearStrobe(); };
-  }, []);
-
-  // ── Permission ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (Platform.OS === "web") { setHasPermission(false); return; }
-    checkPermission();
-  }, []);
-
-  async function checkPermission(): Promise<boolean> {
-    try {
-      const cam = await import("expo-camera");
-      let granted = false;
-      if (typeof (cam as any).Camera?.getCameraPermissionsAsync === "function") {
-        const res = await (cam as any).Camera.getCameraPermissionsAsync();
-        granted = res.granted;
-      } else if (typeof (cam as any).getCameraPermissionsAsync === "function") {
-        const res = await (cam as any).getCameraPermissionsAsync();
-        granted = res.granted;
-      }
-      if (mounted.current) setHasPermission(granted);
-      return granted;
-    } catch {
-      if (mounted.current) setHasPermission(false);
-      return false;
-    }
-  }
-
-  const requestPermission = useCallback(async () => {
-    if (Platform.OS === "web") return;
-    try {
-      const cam = await import("expo-camera");
-      let granted = false;
-      if (typeof (cam as any).Camera?.requestCameraPermissionsAsync === "function") {
-        const res = await (cam as any).Camera.requestCameraPermissionsAsync();
-        granted = res.granted;
-      } else if (typeof (cam as any).requestCameraPermissionsAsync === "function") {
-        const res = await (cam as any).requestCameraPermissionsAsync();
-        granted = res.granted;
-      }
-      if (mounted.current) setHasPermission(granted);
-    } catch {
-      if (mounted.current) setHasPermission(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!config.enabled || Platform.OS === "web") return;
-    if (hasPermission !== false) return;
-    requestPermission();
-  }, [config.enabled, hasPermission]);
-
-  // ── Theta-burst mode ──────────────────────────────────────────────────────
-  const isThetaBurst = config.mode === "theta-burst";
-  useThetaBurst(
-    config.enabled && isThetaBurst,
-    hasPermission,
-    setTorchOn,
-    mounted
-  );
-
-  // ── Pulse / entrainment / schumann modes ──────────────────────────────────
-  function clearStrobe() {
-    if (intervalRef.current)  clearInterval(intervalRef.current);
-    if (offTimerRef.current)  clearTimeout(offTimerRef.current);
-    intervalRef.current = null;
-    offTimerRef.current = null;
-  }
-
-  const activeHz = config.mode === "schumann" ? SCHUMANN_HZ : config.hz;
-  const dutyCycle = config.dutyCycle ?? 0.40;
-
-  useEffect(() => {
-    if (isThetaBurst) return;                   // handled by useThetaBurst
-    if (config.mode === "breath-sync") return;  // handled by breath-sync effect below
-    clearStrobe();
-    if (mounted.current) setTorchOn(false);
-
-    if (!config.enabled || !hasPermission || activeHz <= 0 || Platform.OS === "web") return;
-
-    const periodMs = 1000 / activeHz;
-    const onDurMs  = Math.round(periodMs * dutyCycle);
-
-    const fire = () => {
-      if (!mounted.current) return;
-      setTorchOn(true);
-      offTimerRef.current = setTimeout(() => {
-        if (mounted.current) setTorchOn(false);
-      }, onDurMs);
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+      if (fadeRef.current) clearInterval(fadeRef.current);
     };
+  }, []);
 
-    fire();
-    intervalRef.current = setInterval(fire, periodMs);
-
-    return clearStrobe;
-  }, [config.enabled, activeHz, hasPermission, dutyCycle, isThetaBurst, config.mode]);
-
-  // ── Breath-sync mode override ─────────────────────────────────────────────
-  // In breath-sync, torch is ON during inhale, OFF during hold+exhale.
-  // Also handles the shutdown path: when enabled becomes false, force torch off.
+  // ── Init ────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (config.mode !== "breath-sync") return;
-    if (Platform.OS === "web") return;
-    if (!config.enabled || !hasPermission) {
-      setTorchOn(false);
-      return;
+    if (!enabled) return;
+    if (Platform.OS === "web") { initWeb(); return; }
+    initNative();
+    return () => { cleanup(); };
+  }, [enabled]);
+
+  async function initNative() {
+    try {
+      const { Audio } = await import("expo-av");
+      // setAudioModeAsync can fail on some Android configs — non-fatal
+      try {
+        await Audio.setAudioModeAsync({
+          playsInSilentModeIOS:    true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid:       true,
+        });
+      } catch (modeErr) {
+        console.warn("[AmbientAudio] setAudioMode skipped:", modeErr);
+      }
+
+      // Resolve asset to a local file:// URI so Android ExoPlayer can decode it.
+      // Passing a require() asset directly gives ExoPlayer a bundle URI it cannot extract.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const assetModule = require("../assets/audio/ambient.mp3");
+      const { Asset } = await import("expo-asset");
+      const asset = Asset.fromModule(assetModule);
+      if (!asset.localUri) await asset.downloadAsync();
+      const localUri: string = asset.localUri ?? asset.uri;
+
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: localUri },
+        { isLooping: true, volume: 0, shouldPlay: false }
+      );
+      soundRef.current = sound;
+      if (isMounted.current) setIsReady(true);
+    } catch (err) {
+      console.warn("[AmbientAudio] init failed:", err);
     }
-    const shouldOn = config.breathPhase?.phase === "inhale";
-    setTorchOn(shouldOn);
-  }, [config.mode, config.breathPhase?.phase, config.enabled, hasPermission]);
+  }
 
-  const isActive = config.enabled && hasPermission === true && Platform.OS !== "web";
+  function initWeb() {
+    // Web: use HTMLAudioElement for better loop support
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const src = require("../assets/audio/ambient.mp3");
+      const audioEl = new (window as any).Audio(typeof src === "string" ? src : src.uri ?? src);
+      audioEl.loop   = true;
+      audioEl.volume = 0;
+      soundRef.current = audioEl;
+      if (isMounted.current) setIsReady(true);
+    } catch (err) {
+      console.warn("[AmbientAudio] web init failed:", err);
+    }
+  }
 
-  return { torchOn, hasPermission, isActive, requestPermission, currentHz: activeHz };
+  function cleanup() {
+    if (fadeRef.current) clearInterval(fadeRef.current);
+    if (soundRef.current) {
+      if (Platform.OS !== "web") {
+        soundRef.current.unloadAsync?.().catch(() => {});
+      } else {
+        soundRef.current.pause?.();
+      }
+      soundRef.current = null;
+    }
+  }
+
+  // ── Volume helpers ───────────────────────────────────────────────────────────
+  function setVol(v: number) {
+    currentVol.current = v;
+    if (!soundRef.current) return;
+    if (Platform.OS !== "web") {
+      soundRef.current.setVolumeAsync?.(v).catch(() => {});
+    } else {
+      try { soundRef.current.volume = v; } catch (_) {}
+    }
+  }
+
+  // fadeIn sans garde isMuted — le toggle gère ça via isMutedRef
+  const fadeIn = useCallback(() => {
+    if (!soundRef.current) return;
+    if (fadeRef.current) clearInterval(fadeRef.current);
+
+    if (Platform.OS !== "web") {
+      soundRef.current.playAsync?.().catch(() => {});
+    } else {
+      soundRef.current.play?.().catch(() => {});
+    }
+    if (isMounted.current) setIsPlaying(true);
+
+    const target = AMBIENT_VOLUME;
+    const step   = target / FADE_STEPS;
+    fadeRef.current = setInterval(() => {
+      const next = Math.min(currentVol.current + step, target);
+      setVol(next);
+      if (next >= target) {
+        clearInterval(fadeRef.current!);
+        fadeRef.current = null;
+      }
+    }, FADE_INTERVAL);
+  }, []);
+
+  const fadeOut = useCallback((cb?: () => void) => {
+    if (!soundRef.current) { cb?.(); return; }
+    if (fadeRef.current) clearInterval(fadeRef.current);
+
+    const start = currentVol.current;
+    const step  = start / FADE_STEPS;
+    fadeRef.current = setInterval(() => {
+      const next = Math.max(currentVol.current - step, 0);
+      setVol(next);
+      if (next <= 0) {
+        clearInterval(fadeRef.current!);
+        fadeRef.current = null;
+        if (Platform.OS !== "web") {
+          soundRef.current?.pauseAsync?.().catch(() => {});
+        } else {
+          soundRef.current?.pause?.();
+        }
+        if (isMounted.current) setIsPlaying(false);
+        cb?.();
+      }
+    }, FADE_INTERVAL);
+  }, []);
+
+  // Utilise isMutedRef pour éviter la stale closure dans le setState updater
+  const toggle = useCallback(() => {
+    const next = !isMutedRef.current;
+    isMutedRef.current = next;
+    setIsMuted(next);
+    if (next) { fadeOut(); }
+    else      { fadeIn(); }
+  }, [fadeIn, fadeOut]);
+
+  // Auto-start once ready
+  useEffect(() => {
+    if (isReady && !isMuted) fadeIn();
+  }, [isReady]);
+
+  return { isReady, isPlaying, isMuted, toggle, fadeIn, fadeOut };
 }

@@ -1,172 +1,217 @@
-import { useEffect, useRef, useState } from "react";
+/**
+ * useFlash — Luminothérapie thérapeutique avancée via torche LED.
+ *
+ * Modes scientifiques :
+ *  "entrainment"  — Entraînement cérébral par fréquence (delta/theta/alpha/beta)
+ *  "breath-sync"  — Torche synchronisée sur le cycle respiratoire
+ *  "theta-burst"  — Rafales theta brèves (inspiré de la stimulation TMS)
+ *  "schumann"     — Résonance de Schumann 7.83 Hz (ancrage terrestre)
+ *  "pulse"        — Pulsation simple à fréquence fixe (mode par défaut)
+ *
+ * Compatible expo-camera v17.x / SDK 54.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 
-export interface SensorState {
-  agitationLevel: "calm" | "moderate" | "agitated";
-  agitationScore: number;
-  lightLevel: "dark" | "dim" | "bright";
-  luxValue: number;
-  motionHz: number;
-  isAvailable: boolean;
+export type LightMode =
+  | "entrainment"
+  | "breath-sync"
+  | "theta-burst"
+  | "schumann"
+  | "pulse";
+
+export interface BreathPhase {
+  phase: "inhale" | "hold" | "exhale";
+  progress: number; // 0–1 within current phase
 }
 
-const DEFAULT: SensorState = {
-  agitationLevel: "calm",
-  agitationScore: 0,
-  lightLevel: "dim",
-  luxValue: 0,
-  motionHz: 0,
-  isAvailable: false,
-};
+interface FlashConfig {
+  hz:          number;
+  enabled:     boolean;
+  intensity:   number;   // 0–1
+  mode?:       LightMode;
+  breathPhase?: BreathPhase;  // used by breath-sync mode
+  dutyCycle?:  number;   // 0–1, default 0.40
+}
 
-export function useSensors(active = true): SensorState {
-  const [state, setState] = useState<SensorState>(DEFAULT);
-  const accelHistory = useRef<number[]>([]);
-  const isMounted = useRef(true);
+interface FlashControl {
+  torchOn:           boolean;
+  hasPermission:     boolean | null;
+  isActive:          boolean;
+  requestPermission: () => Promise<void>;
+  currentHz:         number;  // actual Hz being used (may differ from config.hz)
+}
+
+// Schumann resonance — frequency of Earth's electromagnetic field
+const SCHUMANN_HZ = 7.83;
+
+// Theta burst: 5 pulses at 50 Hz, then 200ms silence, repeat
+function useThetaBurst(
+  enabled: boolean,
+  hasPermission: boolean | null,
+  setTorchOn: (v: boolean) => void,
+  mounted: React.MutableRefObject<boolean>
+) {
+  const ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clear() {
+    if (ref.current) clearTimeout(ref.current);
+    ref.current = null;
+  }
 
   useEffect(() => {
-    isMounted.current = true;
-    return () => { isMounted.current = false; };
-  }, []);
-
-  // ─── Web: DeviceMotion API (works on Android Chrome) ──────────────────────
-  useEffect(() => {
-    if (!active || Platform.OS !== "web") return;
-    if (typeof window === "undefined") return;
-
-    let gotData = false;
-
-    const onMotion = (e: DeviceMotionEvent) => {
-      gotData = true;
-      const g = e.accelerationIncludingGravity;
-      if (!g) return;
-      const ax = g.x ?? 0;
-      const ay = g.y ?? 0;
-      const az = g.z ?? 0;
-      // magnitude relative to gravity
-      const raw = Math.sqrt(ax * ax + ay * ay + az * az);
-      const delta = Math.abs(raw - 9.81) / 9.81;
-
-      accelHistory.current = [...accelHistory.current.slice(-19), delta];
-      const avg =
-        accelHistory.current.reduce((a, b) => a + b, 0) /
-        Math.max(1, accelHistory.current.length);
-
-      const score = Math.min(1, avg * 6);
-      const level: SensorState["agitationLevel"] =
-        score < 0.15 ? "calm" : score < 0.45 ? "moderate" : "agitated";
-
-      if (isMounted.current) {
-        setState((prev) => ({
-          ...prev,
-          agitationScore: score,
-          agitationLevel: level,
-          motionHz: Math.round(raw * 10) / 10,
-          isAvailable: true,
-        }));
-      }
-    };
-
-    window.addEventListener("devicemotion", onMotion);
-
-    // Fallback after 1.5s — desktop / simulator shows calm state
-    const fallback = setTimeout(() => {
-      if (!gotData && isMounted.current) {
-        setState({
-          agitationLevel: "calm",
-          agitationScore: 0.04,
-          lightLevel: "dim",
-          luxValue: 0,
-          motionHz: 0,
-          isAvailable: true,
-        });
-      }
-    }, 1500);
-
-    return () => {
-      window.removeEventListener("devicemotion", onMotion);
-      clearTimeout(fallback);
-    };
-  }, [active]);
-
-  // ─── Native: expo-sensors Accelerometer + LightSensor ─────────────────────
-  useEffect(() => {
-    if (!active || Platform.OS === "web") return;
-
-    let accelSub: { remove: () => void } | null = null;
-    let lightSub: { remove: () => void } | null = null;
-
-    async function setup() {
-      try {
-        const Sensors = await import("expo-sensors");
-
-        Sensors.Accelerometer.setUpdateInterval(200);
-        accelSub = Sensors.Accelerometer.addListener(({ x, y, z }) => {
-          const magnitude = Math.sqrt(x * x + y * y + z * z);
-          const delta = Math.abs(magnitude - 1.0);
-
-          accelHistory.current = [...accelHistory.current.slice(-19), delta];
-          const avg =
-            accelHistory.current.reduce((a, b) => a + b, 0) /
-            accelHistory.current.length;
-
-          const score = Math.min(1, avg * 5);
-          const level: SensorState["agitationLevel"] =
-            score < 0.15 ? "calm" : score < 0.45 ? "moderate" : "agitated";
-
-          const crossings = accelHistory.current.reduce((acc, val, i, arr) => {
-            if (i === 0) return acc;
-            return acc + (arr[i - 1]! < 0.05 && val >= 0.05 ? 1 : 0);
-          }, 0);
-          const motionHz = (crossings / (accelHistory.current.length * 0.2)) * 0.5;
-
-          if (isMounted.current) {
-            setState((prev) => ({
-              ...prev,
-              agitationScore: score,
-              agitationLevel: level,
-              motionHz,
-              isAvailable: true,
-            }));
-          }
-        });
-
-        if (Platform.OS === "android") {
-          Sensors.LightSensor.setUpdateInterval(2000);
-          lightSub = Sensors.LightSensor.addListener(({ illuminance }) => {
-            const level: SensorState["lightLevel"] =
-              illuminance < 50 ? "dark" : illuminance < 500 ? "dim" : "bright";
-            if (isMounted.current) {
-              setState((prev) => ({
-                ...prev,
-                luxValue: illuminance,
-                lightLevel: level,
-                isAvailable: true,
-              }));
-            }
-          });
-        }
-      } catch (_) {}
+    clear();
+    if (!enabled || !hasPermission || Platform.OS === "web") {
+      setTorchOn(false);
+      return;
     }
 
-    setup();
+    // 3 pulses at 50Hz within a burst, 800ms silence between bursts
+    const PULSE_ON  = 10;  // ms
+    const PULSE_OFF = 10;  // ms
+    const PULSES    = 3;
+    const BURST_GAP = 800; // ms between burst starts
 
-    return () => {
-      accelSub?.remove();
-      lightSub?.remove();
-    };
-  }, [active]);
+    function runBurst(n: number) {
+      if (!mounted.current || !enabled) { setTorchOn(false); return; }
+      if (n >= PULSES) {
+        setTorchOn(false);
+        ref.current = setTimeout(() => runBurst(0), BURST_GAP);
+        return;
+      }
+      setTorchOn(true);
+      ref.current = setTimeout(() => {
+        if (mounted.current) setTorchOn(false);
+        ref.current = setTimeout(() => runBurst(n + 1), PULSE_OFF);
+      }, PULSE_ON);
+    }
 
-  return state;
+    runBurst(0);
+    return clear;
+  }, [enabled, hasPermission]);
 }
 
-export function getSessionRecommendation(
-  sensors: SensorState,
-  hour: number
-): string {
-  if (hour >= 22 || hour < 6)  return "nid";
-  if (sensors.agitationLevel === "agitated") return "respiration";
-  if (sensors.agitationLevel === "moderate") return "reboot";
-  if (hour >= 6 && hour < 10)  return "etincelle";
-  return "cristal";
+export function useFlash(config: FlashConfig): FlashControl {
+  const [torchOn,       setTorchOn]       = useState(false);
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const intervalRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+  const offTimerRef    = useRef<ReturnType<typeof setTimeout>  | null>(null);
+  const mounted        = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; clearStrobe(); };
+  }, []);
+
+  // ── Permission ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (Platform.OS === "web") { setHasPermission(false); return; }
+    checkPermission();
+  }, []);
+
+  async function checkPermission(): Promise<boolean> {
+    try {
+      const cam = await import("expo-camera");
+      let granted = false;
+      if (typeof (cam as any).Camera?.getCameraPermissionsAsync === "function") {
+        const res = await (cam as any).Camera.getCameraPermissionsAsync();
+        granted = res.granted;
+      } else if (typeof (cam as any).getCameraPermissionsAsync === "function") {
+        const res = await (cam as any).getCameraPermissionsAsync();
+        granted = res.granted;
+      }
+      if (mounted.current) setHasPermission(granted);
+      return granted;
+    } catch {
+      if (mounted.current) setHasPermission(false);
+      return false;
+    }
+  }
+
+  const requestPermission = useCallback(async () => {
+    if (Platform.OS === "web") return;
+    try {
+      const cam = await import("expo-camera");
+      let granted = false;
+      if (typeof (cam as any).Camera?.requestCameraPermissionsAsync === "function") {
+        const res = await (cam as any).Camera.requestCameraPermissionsAsync();
+        granted = res.granted;
+      } else if (typeof (cam as any).requestCameraPermissionsAsync === "function") {
+        const res = await (cam as any).requestCameraPermissionsAsync();
+        granted = res.granted;
+      }
+      if (mounted.current) setHasPermission(granted);
+    } catch {
+      if (mounted.current) setHasPermission(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!config.enabled || Platform.OS === "web") return;
+    if (hasPermission !== false) return;
+    requestPermission();
+  }, [config.enabled, hasPermission]);
+
+  // ── Theta-burst mode ──────────────────────────────────────────────────────
+  const isThetaBurst = config.mode === "theta-burst";
+  useThetaBurst(
+    config.enabled && isThetaBurst,
+    hasPermission,
+    setTorchOn,
+    mounted
+  );
+
+  // ── Pulse / entrainment / schumann modes ──────────────────────────────────
+  function clearStrobe() {
+    if (intervalRef.current)  clearInterval(intervalRef.current);
+    if (offTimerRef.current)  clearTimeout(offTimerRef.current);
+    intervalRef.current = null;
+    offTimerRef.current = null;
+  }
+
+  const activeHz = config.mode === "schumann" ? SCHUMANN_HZ : config.hz;
+  const dutyCycle = config.dutyCycle ?? 0.40;
+
+  useEffect(() => {
+    if (isThetaBurst) return;                   // handled by useThetaBurst
+    if (config.mode === "breath-sync") return;  // handled by breath-sync effect below
+    clearStrobe();
+    if (mounted.current) setTorchOn(false);
+
+    if (!config.enabled || !hasPermission || activeHz <= 0 || Platform.OS === "web") return;
+
+    const periodMs = 1000 / activeHz;
+    const onDurMs  = Math.round(periodMs * dutyCycle);
+
+    const fire = () => {
+      if (!mounted.current) return;
+      setTorchOn(true);
+      offTimerRef.current = setTimeout(() => {
+        if (mounted.current) setTorchOn(false);
+      }, onDurMs);
+    };
+
+    fire();
+    intervalRef.current = setInterval(fire, periodMs);
+
+    return clearStrobe;
+  }, [config.enabled, activeHz, hasPermission, dutyCycle, isThetaBurst, config.mode]);
+
+  // ── Breath-sync mode override ─────────────────────────────────────────────
+  // In breath-sync, torch is ON during inhale, OFF during hold+exhale.
+  // Also handles the shutdown path: when enabled becomes false, force torch off.
+  useEffect(() => {
+    if (config.mode !== "breath-sync") return;
+    if (Platform.OS === "web") return;
+    if (!config.enabled || !hasPermission) {
+      setTorchOn(false);
+      return;
+    }
+    const shouldOn = config.breathPhase?.phase === "inhale";
+    setTorchOn(shouldOn);
+  }, [config.mode, config.breathPhase?.phase, config.enabled, hasPermission]);
+
+  const isActive = config.enabled && hasPermission === true && Platform.OS !== "web";
+
+  return { torchOn, hasPermission, isActive, requestPermission, currentHz: activeHz };
 }

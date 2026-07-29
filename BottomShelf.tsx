@@ -1,726 +1,295 @@
 import { SymIcon } from "@/components/SymIcon";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
-  Modal,
   Platform,
+  UIManager,
 } from "react-native";
 import Animated, {
   useSharedValue,
-  withRepeat,
   withTiming,
-  withSequence,
   useAnimatedStyle,
   Easing,
   interpolate,
-  withDelay,
-  cancelAnimation,
 } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColors } from "@/hooks/useColors";
+import { useSubscription } from "@/context/SubscriptionContext";
 import { useLanguage } from "@/context/LanguageContext";
+import { SESSIONS } from "@/data/sessions";
+import { Session } from "@/types";
 
-const TAP_TARGET = 7;
-const TAP_WINDOW_MS = 3000;
-
-interface FeeBeletteProps {
-  onInfoPress?: () => void;
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-export function FeeBeletteIcon({ onInfoPress }: FeeBeletteProps = {}) {
+const WAVE_META: Record<string, { label: string; color: string; icon: string }> = {
+  delta: { label: "DELTA", color: "#7c4dff", icon: "moon-outline" },
+  theta: { label: "THÊTA", color: "#9c6dff", icon: "cellular-outline" },
+  alpha: { label: "ALPHA", color: "#00e5ff", icon: "pulse-outline" },
+};
+
+const DETAIL_H = 92;
+
+interface Props {
+  onStartSession: (sessionId: string) => void;
+}
+
+function SessionRow({
+  session,
+  onStart,
+}: {
+  session: Session;
+  onStart: () => void;
+}) {
   const colors = useColors();
-  const { t } = useLanguage();
-  const taps = useRef<number[]>([]);
-  const [showReset, setShowReset] = useState(false);
-  const [rippleVisible, setRippleVisible] = useState(false);
+  const [open, setOpen] = useState(false);
+  const wave = WAVE_META[session.waveType] ?? WAVE_META.alpha!;
+  const heightAnim = useSharedValue(0);
+  const chevronAnim = useSharedValue(0);
 
-  const rotate = useSharedValue(0);
-  const wingL = useSharedValue(0);
-  const wingR = useSharedValue(0);
-  const glow = useSharedValue(0.4);
-  const orbScale = useSharedValue(1);
-  const ripple = useSharedValue(0);
+  const toggle = useCallback(() => {
+    const next = !open;
+    setOpen(next);
+    heightAnim.value = withTiming(next ? DETAIL_H : 0, {
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+    });
+    chevronAnim.value = withTiming(next ? 1 : 0, { duration: 250 });
+  }, [open]);
 
-  useEffect(() => {
-    rotate.value = withRepeat(
-      withTiming(360, { duration: 12000, easing: Easing.linear }),
-      -1
-    );
-    wingL.value = withRepeat(
-      withSequence(
-        withTiming(-18, { duration: 1200, easing: Easing.inOut(Easing.sin) }),
-        withTiming(-8, { duration: 1200, easing: Easing.inOut(Easing.sin) })
-      ),
-      -1
-    );
-    wingR.value = withRepeat(
-      withSequence(
-        withTiming(18, { duration: 1200, easing: Easing.inOut(Easing.sin) }),
-        withTiming(8, { duration: 1200, easing: Easing.inOut(Easing.sin) })
-      ),
-      -1
-    );
-    glow.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 2000, easing: Easing.inOut(Easing.sin) }),
-        withTiming(0.3, { duration: 2000, easing: Easing.inOut(Easing.sin) })
-      ),
-      -1
-    );
-    orbScale.value = withRepeat(
-      withSequence(
-        withTiming(1.06, { duration: 1800, easing: Easing.inOut(Easing.sin) }),
-        withTiming(0.96, { duration: 1800, easing: Easing.inOut(Easing.sin) })
-      ),
-      -1
-    );
-  }, []);
-
-  const handleTap = useCallback(() => {
-    const now = Date.now();
-    taps.current = [...taps.current.filter((t) => now - t < TAP_WINDOW_MS), now];
-
-    ripple.value = 0;
-    ripple.value = withTiming(1, { duration: 600, easing: Easing.out(Easing.cubic) });
-    setRippleVisible(true);
-    setTimeout(() => setRippleVisible(false), 620);
-
-    if (taps.current.length >= TAP_TARGET) {
-      taps.current = [];
-      setTimeout(() => setShowReset(true), 150);
-    }
-  }, []);
-
-  const rotateStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotate.value}deg` }],
+  const detailStyle = useAnimatedStyle(() => ({
+    height: heightAnim.value,
+    overflow: "hidden",
+    opacity: interpolate(heightAnim.value, [0, DETAIL_H * 0.4, DETAIL_H], [0, 0.7, 1]),
   }));
-  const wingLStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${wingL.value}deg` }],
-  }));
-  const wingRStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${wingR.value}deg` }],
-  }));
-  const glowStyle = useAnimatedStyle(() => ({
-    opacity: glow.value,
-  }));
-  const orbStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: orbScale.value }],
-  }));
-  const rippleStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: interpolate(ripple.value, [0, 1], [0.3, 1.8]) }],
-    opacity: interpolate(ripple.value, [0, 0.6, 1], [0.7, 0.3, 0]),
+
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${interpolate(chevronAnim.value, [0, 1], [0, 180])}deg` }],
   }));
 
   return (
-    <>
-      <View style={styles.container}>
-        <Pressable onPress={handleTap} style={styles.orbArea}>
-          <Animated.View style={[styles.glowRing, glowStyle, { borderColor: colors.secondary + "60" }]} />
-          <Animated.View style={[styles.glowRing2, glowStyle, { borderColor: colors.primary + "30" }]} />
-
-          {rippleVisible && (
-            <Animated.View
-              style={[styles.ripple, rippleStyle, { borderColor: colors.secondary + "80" }]}
-            />
-          )}
-
-          <Animated.View style={[styles.orbWrapper, orbStyle]}>
-            <View style={[styles.orbBg, { backgroundColor: colors.muted, borderColor: colors.secondary + "50" }]}>
-              <LinearGradient
-                colors={[colors.secondary + "30", colors.primary + "15"]}
-                style={[StyleSheet.absoluteFill, { borderRadius: 42 }]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              />
-
-              <Animated.View style={[styles.wingLeft, wingLStyle]}>
-                <WingShape color={colors.secondary} flip={false} />
-              </Animated.View>
-              <Animated.View style={[styles.wingRight, wingRStyle]}>
-                <WingShape color={colors.primary} flip />
-              </Animated.View>
-
-              <View style={styles.centerIcon}>
-                <Animated.View style={rotateStyle}>
-                  <View style={[styles.orbInner, { borderColor: colors.secondary + "80" }]}>
-                    <LinearGradient
-                      colors={[colors.secondary + "50", colors.primary + "30"]}
-                      style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                    />
-                  </View>
-                </Animated.View>
-                <View style={styles.eyeOverlay}>
-                  <SymIcon name="eye-outline" size={14} color={colors.primary} />
-                </View>
-              </View>
-
-              <View style={styles.sparkles}>
-                <SparkDot color={colors.secondary} x={-16} y={-10} delay={0} />
-                <SparkDot color={colors.primary} x={16} y={-12} delay={400} />
-                <SparkDot color={colors.amber} x={-20} y={8} delay={800} />
-                <SparkDot color={colors.secondary} x={20} y={6} delay={1200} />
-              </View>
-            </View>
+    <View style={[styles.rowWrapper, { borderColor: open ? wave.color + "40" : colors.border }]}>
+      {/* Pill header */}
+      <Pressable
+        onPress={toggle}
+        style={({ pressed }) => [
+          styles.pill,
+          { backgroundColor: colors.card },
+          pressed && { opacity: 0.88 },
+        ]}
+      >
+        <LinearGradient
+          colors={open ? [wave.color + "12", "transparent"] : ["transparent", "transparent"]}
+          style={[StyleSheet.absoluteFill, { borderRadius: 12 }]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+        />
+        <View style={[styles.waveDot, { backgroundColor: wave.color }]} />
+        <View style={styles.pillCenter}>
+          <Text style={[styles.pillName, { color: colors.foreground }]} numberOfLines={1}>
+            {session.name}
+          </Text>
+          <Text style={[styles.pillTagline, { color: colors.mutedForeground }]} numberOfLines={1}>
+            {session.tagline}
+          </Text>
+        </View>
+        <View style={styles.pillRight}>
+          <View style={[styles.durationBadge, { backgroundColor: wave.color + "18", borderColor: wave.color + "35" }]}>
+            <Text style={[styles.durationText, { color: wave.color }]}>{session.durationLabel}</Text>
+          </View>
+          <Animated.View style={chevronStyle}>
+            <SymIcon name="chevron-down" size={14} color={colors.mutedForeground} />
           </Animated.View>
-        </Pressable>
+        </View>
+      </Pressable>
 
-        <Pressable
-          onPress={onInfoPress}
-          disabled={!onInfoPress}
-          style={({ pressed }) => [styles.labelArea, onInfoPress && pressed && { opacity: 0.7 }]}
-        >
-          <View style={styles.labelRow}>
-            <Text style={[styles.labelTop, { color: colors.secondary }]}>✦ FÉE BELETTE ✦</Text>
-          </View>
-          <View style={styles.labelSubRow}>
-            <Text style={[styles.labelSub, { color: colors.mutedForeground }]}>
-              Reboot System · by Blacklace Island
-            </Text>
-            {onInfoPress && (
-              <View style={[styles.infoHint, { borderColor: colors.border }]}>
-                <SymIcon name="information-circle-outline" size={11} color={colors.mutedForeground} />
+      {/* Expandable detail */}
+      <Animated.View style={detailStyle}>
+        <View style={[styles.detail, { backgroundColor: wave.color + "08" }]}>
+          <Text style={[styles.detailDesc, { color: colors.mutedForeground }]} numberOfLines={2}>
+            {session.description}
+          </Text>
+          <View style={styles.detailMeta}>
+            <View style={styles.metaGroup}>
+              <View style={[styles.waveBadge, { backgroundColor: wave.color + "18", borderColor: wave.color + "35" }]}>
+                <SymIcon name={wave.icon as any} size={9} color={wave.color} />
+                <Text style={[styles.waveLabel, { color: wave.color }]}>{wave.label}</Text>
               </View>
-            )}
-          </View>
-        </Pressable>
-      </View>
-
-      <RebootModal
-        visible={showReset}
-        onClose={() => setShowReset(false)}
-      />
-    </>
-  );
-}
-
-function WingShape({ color, flip }: { color: string; flip: boolean }) {
-  return (
-    <View
-      style={[
-        styles.wing,
-        {
-          borderTopColor: color + "70",
-          borderLeftColor: flip ? "transparent" : color + "40",
-          borderRightColor: flip ? color + "40" : "transparent",
-          transform: [{ scaleX: flip ? -1 : 1 }],
-        },
-      ]}
-    />
-  );
-}
-
-function SparkDot({ color, x, y, delay }: { color: string; x: number; y: number; delay: number }) {
-  const opacity = useSharedValue(0);
-  const s = useSharedValue(0.5);
-
-  useEffect(() => {
-    const startAnim = () => {
-      opacity.value = withDelay(
-        delay,
-        withRepeat(
-          withSequence(
-            withTiming(1, { duration: 600 }),
-            withTiming(0, { duration: 600 })
-          ),
-          -1
-        )
-      );
-      s.value = withDelay(
-        delay,
-        withRepeat(
-          withSequence(
-            withTiming(1.3, { duration: 600 }),
-            withTiming(0.6, { duration: 600 })
-          ),
-          -1
-        )
-      );
-    };
-    startAnim();
-  }, []);
-
-  const style = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [{ scale: s.value }],
-  }));
-
-  return (
-    <Animated.View
-      style={[
-        styles.sparkDot,
-        { backgroundColor: color, position: "absolute", left: 26 + x, top: 26 + y },
-        style,
-      ]}
-    />
-  );
-}
-
-function RebootModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const colors = useColors();
-  const { t } = useLanguage();
-  const [phase, setPhase] = useState<"idle" | "running" | "done">("idle");
-
-  const spin = useSharedValue(0);
-  const dnaPhase = useSharedValue(0);
-
-  useEffect(() => {
-    if (phase === "running") {
-      spin.value = withRepeat(withTiming(360, { duration: 1200, easing: Easing.linear }), -1);
-      dnaPhase.value = withRepeat(withTiming(1, { duration: 800, easing: Easing.inOut(Easing.sin) }), -1, true);
-    } else {
-      cancelAnimation(spin);
-      cancelAnimation(dnaPhase);
-      spin.value = 0;
-    }
-  }, [phase]);
-
-  const spinStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${spin.value}deg` }],
-  }));
-
-  const handleReset = async () => {
-    setPhase("running");
-    try {
-      const keys = await AsyncStorage.getAllKeys();
-      await AsyncStorage.multiRemove(keys);
-      await new Promise((r) => setTimeout(r, 2000));
-      setPhase("done");
-      setTimeout(() => {
-        setPhase("idle");
-        onClose();
-      }, 1500);
-    } catch {
-      setPhase("idle");
-    }
-  };
-
-  const handleClose = () => {
-    if (phase === "running") return;
-    setPhase("idle");
-    onClose();
-  };
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      statusBarTranslucent
-      onRequestClose={handleClose}
-    >
-      <Pressable style={styles.backdrop} onPress={phase === "idle" ? handleClose : undefined}>
-        <Pressable onPress={(e) => e.stopPropagation()}>
-          <View style={[styles.resetCard, { backgroundColor: colors.card, borderColor: colors.destructive + "50" }]}>
-            <LinearGradient
-              colors={[colors.destructive + "12", colors.secondary + "08", "transparent"]}
-              style={[StyleSheet.absoluteFill, { borderRadius: 24 }]}
-              start={{ x: 0.5, y: 0 }}
-              end={{ x: 0.5, y: 1 }}
-            />
-
-            <View style={styles.resetIconRow}>
-              {phase === "running" ? (
-                <Animated.View style={spinStyle}>
-                  <DnaHelix color={colors.destructive} />
-                </Animated.View>
-              ) : phase === "done" ? (
-                <View style={[styles.doneCircle, { borderColor: colors.accent + "60", backgroundColor: colors.accent + "15" }]}>
-                  <SymIcon name="checkmark" size={28} color={colors.accent} />
+              <Text style={[styles.metaHz, { color: colors.mutedForeground }]}>
+                {session.carrierFreq} + {session.waveHz} Hz
+              </Text>
+              {session.flashEnabled && (
+                <View style={[styles.flashBadge, { borderColor: colors.secondary + "40" }]}>
+                  <SymIcon name="flashlight-outline" size={9} color={colors.secondary} />
+                  <Text style={[styles.flashText, { color: colors.secondary }]}>{session.flashHz} Hz</Text>
                 </View>
-              ) : (
-                <DnaHelix color={colors.destructive} />
               )}
             </View>
-
-            <Text style={[styles.resetTitle, { color: colors.destructive }]}>
-              {t.rebootTitle}
-            </Text>
-            <Text style={[styles.resetSub, { color: colors.secondary }]}>
-              {t.rebootSub}
-            </Text>
-
-            {phase === "idle" && (
-              <View style={[styles.warningBox, { backgroundColor: colors.destructive + "10", borderColor: colors.destructive + "30" }]}>
-                <SymIcon name="warning-outline" size={14} color={colors.destructive} />
-                <Text style={[styles.warningText, { color: colors.destructive + "cc" }]}>
-                  {t.rebootWarning}
-                </Text>
-              </View>
-            )}
-
-            {phase === "running" && (
-              <View style={[styles.progressRow, { borderColor: colors.border }]}>
-                <Text style={[styles.progressText, { color: colors.mutedForeground }]}>
-                  {t.rebootProgress}
-                </Text>
-                <ProgressDots color={colors.destructive} />
-              </View>
-            )}
-
-            {phase === "done" && (
-              <Text style={[styles.doneText, { color: colors.accent }]}>
-                ✓ {t.rebootDone}
-              </Text>
-            )}
-
-            {phase === "idle" && (
-              <View style={styles.resetBtns}>
-                <Pressable
-                  onPress={handleClose}
-                  style={[styles.cancelBtn, { borderColor: colors.border }]}
-                >
-                  <Text style={[styles.cancelBtnText, { color: colors.mutedForeground }]}>
-                    {t.rebootCancel}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={handleReset}
-                  style={[styles.confirmBtn, { backgroundColor: colors.destructive + "18", borderColor: colors.destructive + "50" }]}
-                >
-                  <SymIcon name="refresh-circle-outline" size={16} color={colors.destructive} />
-                  <Text style={[styles.confirmBtnText, { color: colors.destructive }]}>
-                    {t.rebootConfirm}
-                  </Text>
-                </Pressable>
-              </View>
-            )}
-
-            <View style={[styles.resetFooter, { borderColor: colors.border }]}>
-              <Text style={[styles.resetFooterText, { color: colors.mutedForeground }]}>
-                Fée Belette Reboot System · v1.0 · Blacklace Island
-              </Text>
-            </View>
+            <Pressable
+              onPress={onStart}
+              style={[styles.startBtn, { backgroundColor: wave.color, borderColor: wave.color }]}
+            >
+              <SymIcon name="play" size={12} color="#000" />
+              <Text style={styles.startBtnText}>GO</Text>
+            </Pressable>
           </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
-function DnaHelix({ color }: { color: string }) {
-  return (
-    <View style={[styles.dnaContainer, { borderColor: color + "50", backgroundColor: color + "10" }]}>
-      <LinearGradient
-        colors={[color + "30", color + "10"]}
-        style={[StyleSheet.absoluteFill, { borderRadius: 28 }]}
-      />
-      <Text style={[styles.dnaText, { color }]}>⌬</Text>
-      <View style={[styles.dnaOrbit, { borderColor: color + "40" }]} />
-      <View style={[styles.dnaOrbit2, { borderColor: color + "25" }]} />
+        </View>
+      </Animated.View>
     </View>
   );
 }
 
-function ProgressDots({ color }: { color: string }) {
-  const d1 = useSharedValue(0.3);
-  const d2 = useSharedValue(0.3);
-  const d3 = useSharedValue(0.3);
+export function SessionsGrid({ onStartSession }: Props) {
+  const colors = useColors();
+  const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const heightAnim = useSharedValue(0);
+  const chevronAnim = useSharedValue(0);
 
-  useEffect(() => {
-    d1.value = withRepeat(withSequence(withTiming(1, { duration: 400 }), withTiming(0.3, { duration: 400 })), -1);
-    d2.value = withDelay(200, withRepeat(withSequence(withTiming(1, { duration: 400 }), withTiming(0.3, { duration: 400 })), -1));
-    d3.value = withDelay(400, withRepeat(withSequence(withTiming(1, { duration: 400 }), withTiming(0.3, { duration: 400 })), -1));
-  }, []);
+  const TOTAL_H = SESSIONS.length * (52 + 6 + DETAIL_H + 4) + 20;
 
-  const s1 = useAnimatedStyle(() => ({ opacity: d1.value }));
-  const s2 = useAnimatedStyle(() => ({ opacity: d2.value }));
-  const s3 = useAnimatedStyle(() => ({ opacity: d3.value }));
+  const toggle = useCallback(() => {
+    const next = !open;
+    setOpen(next);
+    heightAnim.value = withTiming(next ? TOTAL_H : 0, {
+      duration: 400,
+      easing: Easing.out(Easing.cubic),
+    });
+    chevronAnim.value = withTiming(next ? 1 : 0, { duration: 280 });
+  }, [open, TOTAL_H]);
+
+  const containerStyle = useAnimatedStyle(() => ({
+    height: heightAnim.value,
+    overflow: "hidden",
+  }));
+
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${interpolate(chevronAnim.value, [0, 1], [0, 180])}deg` }],
+  }));
 
   return (
-    <View style={styles.dots}>
-      {[s1, s2, s3].map((style, i) => (
-        <Animated.View key={i} style={[styles.dot, { backgroundColor: color }, style]} />
-      ))}
+    <View style={styles.wrapper}>
+      <Pressable
+        onPress={toggle}
+        style={({ pressed }) => [
+          styles.header,
+          {
+            backgroundColor: colors.card,
+            borderColor: open ? colors.primary + "40" : colors.border,
+          },
+          pressed && { opacity: 0.85 },
+        ]}
+      >
+        <LinearGradient
+          colors={open ? [colors.primary + "08", "transparent"] : ["transparent", "transparent"]}
+          style={[StyleSheet.absoluteFill, { borderRadius: 14 }]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+        />
+        <View style={styles.headerLeft}>
+          <View style={[styles.headerDot, { backgroundColor: colors.primary }]} />
+          <Text style={[styles.headerTitle, { color: colors.foreground }]}>{t.sessions}</Text>
+          <View style={[styles.countBadge, { backgroundColor: colors.primary + "18", borderColor: colors.primary + "30" }]}>
+            <Text style={[styles.countText, { color: colors.primary }]}>{SESSIONS.length}</Text>
+          </View>
+        </View>
+        <View style={styles.headerRight}>
+          <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
+            {open ? t.collapse : t.viewAll}
+          </Text>
+          <Animated.View style={chevronStyle}>
+            <SymIcon name="chevron-down" size={15} color={colors.mutedForeground} />
+          </Animated.View>
+        </View>
+      </Pressable>
+
+      <Animated.View style={containerStyle}>
+        <View style={styles.list}>
+          {SESSIONS.map((session) => (
+            <SessionRow
+              key={session.id}
+              session={session}
+              onStart={() => onStartSession(session.id)}
+            />
+          ))}
+        </View>
+      </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    alignItems: "center",
-    gap: 8,
-  },
-  orbArea: {
-    alignItems: "center",
-    justifyContent: "center",
-    width: 120,
-    height: 120,
-  },
-  labelArea: {
-    alignItems: "center",
-    gap: 4,
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-  },
-  labelSubRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  infoHint: {
-    borderRadius: 6,
-    borderWidth: 1,
-    width: 16,
-    height: 16,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  glowRing: {
-    position: "absolute",
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    borderWidth: 1,
-    top: 3,
-  },
-  glowRing2: {
-    position: "absolute",
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    borderWidth: 1,
-    top: -7,
-  },
-  ripple: {
-    position: "absolute",
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    borderWidth: 2,
-    top: 3,
-  },
-  orbWrapper: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  orbBg: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  wingLeft: {
-    position: "absolute",
-    left: 2,
-    top: 18,
-  },
-  wingRight: {
-    position: "absolute",
-    right: 2,
-    top: 18,
-  },
-  wing: {
-    width: 20,
-    height: 18,
-    borderTopWidth: 2,
-    borderLeftWidth: 1.5,
-    borderRightWidth: 1.5,
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    borderBottomColor: "transparent",
-  },
-  centerIcon: {
-    width: 34,
-    height: 34,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  orbInner: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    overflow: "hidden",
-  },
-  eyeOverlay: {
-    position: "absolute",
-  },
-  sparkles: {
-    position: "absolute",
-    width: 52,
-    height: 52,
-    top: 16,
-    left: 16,
-  },
-  sparkDot: {
-    width: 3,
-    height: 3,
-    borderRadius: 1.5,
-  },
-  labelRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  labelTop: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 3,
-  },
-  labelSub: {
-    fontSize: 10,
-    letterSpacing: 1.5,
-    marginTop: -2,
-  },
-  backdrop: {
-    flex: 1,
-    backgroundColor: "#000000a8",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
-  resetCard: {
-    borderRadius: 24,
-    borderWidth: 1,
-    padding: 24,
-    gap: 12,
-    width: "100%",
-    maxWidth: 360,
-    overflow: "hidden",
-  },
-  resetIconRow: {
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  dnaContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "visible",
-  },
-  dnaOrbit: {
-    position: "absolute",
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    borderWidth: 1,
-    borderStyle: "dashed",
-  },
-  dnaOrbit2: {
-    position: "absolute",
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    borderWidth: 1,
-    borderStyle: "dashed",
-  },
-  dnaText: {
-    fontSize: 22,
-    fontWeight: "300",
-  },
-  doneCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  resetTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 3,
-    textAlign: "center",
-  },
-  resetSub: {
-    fontSize: 12,
-    textAlign: "center",
-    letterSpacing: 0.5,
-    lineHeight: 18,
-  },
-  warningBox: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 8,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-  },
-  warningText: {
-    fontSize: 12,
-    flex: 1,
-    lineHeight: 17,
-    letterSpacing: 0.2,
-  },
-  progressRow: {
+  wrapper: { width: "100%", marginTop: 16 },
+  header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderWidth: 1,
-    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    overflow: "hidden",
   },
-  progressText: {
-    fontSize: 12,
-    letterSpacing: 0.5,
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: 7 },
+  headerDot: { width: 5, height: 5, borderRadius: 2.5 },
+  headerTitle: { fontSize: 11, fontWeight: "600", letterSpacing: 2 },
+  countBadge: { borderRadius: 7, borderWidth: 1, paddingHorizontal: 5, paddingVertical: 1 },
+  countText: { fontSize: 10, fontWeight: "700" },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 5 },
+  headerSub: { fontSize: 11, letterSpacing: 0.4 },
+  list: { paddingTop: 8, gap: 6 },
+  rowWrapper: {
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: "hidden",
   },
-  dots: {
+  pill: {
     flexDirection: "row",
-    gap: 4,
-  },
-  dot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-  },
-  doneText: {
-    fontSize: 14,
-    fontWeight: "600",
-    letterSpacing: 1,
-    textAlign: "center",
-  },
-  resetBtns: {
-    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
     gap: 10,
-    marginTop: 4,
+    overflow: "hidden",
   },
-  cancelBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingVertical: 13,
-    alignItems: "center",
+  waveDot: { width: 6, height: 6, borderRadius: 3, flexShrink: 0 },
+  pillCenter: { flex: 1, gap: 1 },
+  pillName: { fontSize: 13, fontWeight: "600", letterSpacing: 0.2 },
+  pillTagline: { fontSize: 10, letterSpacing: 0.3 },
+  pillRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  durationBadge: {
+    paddingHorizontal: 6, paddingVertical: 2,
+    borderRadius: 6, borderWidth: 1,
   },
-  cancelBtnText: {
-    fontSize: 13,
-    fontWeight: "500",
+  durationText: { fontSize: 9, fontWeight: "600", letterSpacing: 0.3 },
+  detail: {
+    paddingHorizontal: 12, paddingVertical: 10, gap: 8,
   },
-  confirmBtn: {
-    flex: 2,
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingVertical: 13,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
+  detailDesc: { fontSize: 11, lineHeight: 16, letterSpacing: 0.2 },
+  detailMeta: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
-  confirmBtnText: {
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1,
+  metaGroup: { flexDirection: "row", alignItems: "center", gap: 6 },
+  waveBadge: {
+    flexDirection: "row", alignItems: "center", gap: 3,
+    paddingHorizontal: 5, paddingVertical: 2,
+    borderRadius: 5, borderWidth: 1,
   },
-  resetFooter: {
-    borderTopWidth: 1,
-    paddingTop: 10,
-    marginTop: 4,
+  waveLabel: { fontSize: 8, fontWeight: "700", letterSpacing: 0.8 },
+  metaHz: { fontSize: 9, letterSpacing: 0.3 },
+  flashBadge: {
+    flexDirection: "row", alignItems: "center", gap: 3,
+    paddingHorizontal: 4, paddingVertical: 2,
+    borderRadius: 4, borderWidth: 1,
   },
-  resetFooterText: {
-    fontSize: 10,
-    textAlign: "center",
-    letterSpacing: 0.5,
+  flashText: { fontSize: 8, fontWeight: "600" },
+  startBtn: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 8, borderWidth: 1,
   },
+  startBtnText: { fontSize: 10, fontWeight: "800", color: "#000", letterSpacing: 1 },
 });

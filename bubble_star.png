@@ -1,45 +1,42 @@
-import { Link, Stack } from "expo-router";
-import { StyleSheet, Text, View } from "react-native";
+import { ScrollViewStyleReset } from "expo-router/html";
+import type { PropsWithChildren } from "react";
 
-import { useColors } from "@/hooks/useColors";
-
-export default function NotFoundScreen() {
-  const colors = useColors();
-
+export default function Root({ children }: PropsWithChildren) {
   return (
-    <>
-      <Stack.Screen options={{ title: "Oops!" }} />
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Text style={[styles.title, { color: colors.foreground }]}>
-          This screen doesn&apos;t exist.
-        </Text>
-
-        <Link href="/" style={styles.link}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>
-            Go to home screen!
-          </Text>
-        </Link>
-      </View>
-    </>
+    <html lang="fr">
+      <head>
+        <meta charSet="utf-8" />
+        <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+        />
+        <meta name="theme-color" content="#080810" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <ScrollViewStyleReset />
+        <style dangerouslySetInnerHTML={{
+          __html: `
+            html, body, #root {
+              background-color: #080810 !important;
+              height: 100dvh !important;
+              max-height: 100dvh !important;
+              overflow: hidden;
+              margin: 0;
+              padding: 0;
+              overscroll-behavior: none;
+              -webkit-tap-highlight-color: transparent;
+            }
+            body {
+              position: fixed;
+              width: 100%;
+            }
+            * { box-sizing: border-box; }
+          `
+        }} />
+      </head>
+      <body>{children}</body>
+    </html>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: "bold",
-  },
-  link: {
-    marginTop: 15,
-    paddingVertical: 15,
-  },
-  linkText: {
-    fontSize: 14,
-  },
-});

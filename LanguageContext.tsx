@@ -1,161 +1,249 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from "react";
+import { SymIcon } from "@/components/SymIcon";
+import React, { useEffect } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+} from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+  interpolate,
+  Easing,
+} from "react-native-reanimated";
+import { LinearGradient } from "expo-linear-gradient";
+import { Session } from "@/types";
 
-const KEY_SUBSCRIPTION = "@fbrs_subscription";
-const MAX_FREE_WEEKLY = 3;
-
-interface SubscriptionState {
-  isPremium: boolean;
-  premiumExpiresAt: number | null;
-  freeSessionsThisWeek: number;
-  freeResetDate: number;
-  forceMode: "free" | "premium" | "normal";
+interface Props {
+  session: Session;
+  onPress: () => void;
+  isRecommended?: boolean;
 }
 
-interface SubscriptionContextValue {
-  isPremium: boolean;
-  freeSessionsLeft: number;
-  canStartSession: () => boolean;
-  recordSessionStart: () => Promise<void>;
-  activatePremium: () => Promise<void>;
-  deactivatePremium: () => Promise<void>;
-  resetFreeCounter: () => Promise<void>;
-  setForceMode: (mode: "free" | "premium" | "normal") => Promise<void>;
-  isReady: boolean;
-}
+const WAVE_SYMBOL: Record<string, string> = {
+  delta: "Δ",
+  theta: "Θ",
+  alpha: "α",
+};
 
-const SubscriptionContext = createContext<SubscriptionContextValue | null>(null);
+const WAVE_LABEL: Record<string, string> = {
+  delta: "Delta",
+  theta: "Theta",
+  alpha: "Alpha",
+};
 
-function getMonday(date: Date): number {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = (day === 0 ? -6 : 1) - day;
-  d.setDate(d.getDate() + diff);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
-export function SubscriptionProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<SubscriptionState>({
-    isPremium: false,
-    premiumExpiresAt: null,
-    freeSessionsThisWeek: 0,
-    freeResetDate: getMonday(new Date()),
-    forceMode: "normal",
-  });
-  const [isReady, setIsReady] = useState(false);
+export function SessionCard({ session, onPress, isRecommended }: Props) {
+  const pulse = useSharedValue(0);
 
   useEffect(() => {
-    async function load() {
-      try {
-        const raw = await AsyncStorage.getItem(KEY_SUBSCRIPTION);
-        if (raw) {
-          const loaded: SubscriptionState = JSON.parse(raw);
-          const currentMonday = getMonday(new Date());
-          if (loaded.freeResetDate < currentMonday) {
-            loaded.freeSessionsThisWeek = 0;
-            loaded.freeResetDate = currentMonday;
-          }
-          setState(loaded);
-        }
-      } catch (_) {}
-      setIsReady(true);
-    }
-    load();
+    pulse.value = withRepeat(
+      withTiming(1, { duration: 3200, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      true,
+    );
   }, []);
 
-  const save = useCallback(async (next: SubscriptionState) => {
-    setState(next);
-    await AsyncStorage.setItem(KEY_SUBSCRIPTION, JSON.stringify(next));
-  }, []);
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(pulse.value, [0, 1], [0.55, 0.85]),
+  }));
 
-  const effectivelyPremium =
-    state.forceMode === "premium" ||
-    (state.forceMode === "normal" &&
-      state.isPremium &&
-      (state.premiumExpiresAt === null || Date.now() < state.premiumExpiresAt));
-
-  const effectivelyFree = state.forceMode === "free";
-
-  const computedFreeLeft = effectivelyFree || !effectivelyPremium
-    ? Math.max(0, MAX_FREE_WEEKLY - state.freeSessionsThisWeek)
-    : Infinity;
-
-  const canStartSession = useCallback(() => {
-    if (effectivelyPremium) return true;
-    return state.freeSessionsThisWeek < MAX_FREE_WEEKLY;
-  }, [state.freeSessionsThisWeek, effectivelyPremium]);
-
-  const recordSessionStart = useCallback(async () => {
-    if (effectivelyPremium) return;
-    const next = {
-      ...state,
-      freeSessionsThisWeek: state.freeSessionsThisWeek + 1,
-    };
-    await save(next);
-  }, [state, save, effectivelyPremium]);
-
-  const activatePremium = useCallback(async () => {
-    const next: SubscriptionState = {
-      ...state,
-      isPremium: true,
-      premiumExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-      forceMode: "normal",
-    };
-    await save(next);
-  }, [state, save]);
-
-  const deactivatePremium = useCallback(async () => {
-    const next: SubscriptionState = { ...state, isPremium: false, premiumExpiresAt: null };
-    await save(next);
-  }, [state, save]);
-
-  const resetFreeCounter = useCallback(async () => {
-    const next: SubscriptionState = {
-      ...state,
-      freeSessionsThisWeek: 0,
-      freeResetDate: getMonday(new Date()),
-    };
-    await save(next);
-  }, [state, save]);
-
-  const setForceMode = useCallback(
-    async (mode: "free" | "premium" | "normal") => {
-      const next: SubscriptionState = { ...state, forceMode: mode };
-      await save(next);
-    },
-    [state, save]
-  );
+  const sym   = WAVE_SYMBOL[session.waveType] ?? "○";
+  const wlab  = WAVE_LABEL[session.waveType]  ?? "";
+  const col0  = session.colors[1];  // saturated center color
+  const dark  = session.colors[3] ?? session.colors[0];  // deepest dark
 
   return (
-    <SubscriptionContext.Provider
-      value={{
-        isPremium: effectivelyPremium,
-        freeSessionsLeft: computedFreeLeft === Infinity ? MAX_FREE_WEEKLY : computedFreeLeft,
-        canStartSession,
-        recordSessionStart,
-        activatePremium,
-        deactivatePremium,
-        resetFreeCounter,
-        setForceMode,
-        isReady,
-      }}
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.container, pressed && styles.pressed]}
     >
-      {children}
-    </SubscriptionContext.Provider>
+      {/* ── Card shell — dark base ── */}
+      <View style={[styles.card, { backgroundColor: dark }]}>
+
+        {/* ── Color world: left-edge glow ── */}
+        <Animated.View style={[StyleSheet.absoluteFill, glowStyle]} pointerEvents="none">
+          <LinearGradient
+            colors={[col0 + "ff", col0 + "88", "transparent"] as [string, string, string]}
+            style={StyleSheet.absoluteFill}
+            start={{ x: 0, y: 0.3 }}
+            end={{ x: 0.75, y: 1 }}
+          />
+        </Animated.View>
+
+        {/* ── Grain overlay for depth ── */}
+        <LinearGradient
+          colors={["#ffffff06", "transparent", "#00000030"] as [string, string, string]}
+          style={StyleSheet.absoluteFill}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          pointerEvents="none"
+        />
+
+        {/* ── Wave watermark — decorative background letter ── */}
+        <Text style={[styles.watermark, { color: col0 + "14" }]} aria-hidden>
+          {sym}
+        </Text>
+
+        {/* ── Content layer ── */}
+        <View style={styles.content}>
+
+          {/* Top row */}
+          <View style={styles.topRow}>
+            <View style={[styles.waveChip, { borderColor: col0 + "50" }]}>
+              <Text style={[styles.waveChipSym, { color: col0 }]}>{sym}</Text>
+              <Text style={[styles.waveChipLabel, { color: col0 + "cc" }]}>
+                {wlab}  ·  {session.waveHz} Hz
+              </Text>
+            </View>
+
+            <View style={styles.topRight}>
+              <View style={[styles.durChip, { backgroundColor: "#ffffff10", borderColor: "#ffffff18" }]}>
+                <Text style={styles.durText}>{session.durationLabel}</Text>
+              </View>
+              {isRecommended && (
+                <View style={[styles.recChip, { backgroundColor: col0 + "22", borderColor: col0 + "50" }]}>
+                  <Text style={[styles.recText, { color: col0 }]}>★</Text>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {/* Name + tagline */}
+          <View style={styles.nameBlock}>
+            <Text style={styles.name} numberOfLines={1}>
+              {session.name}
+            </Text>
+            <Text style={[styles.tagline, { color: col0 + "99" }]} numberOfLines={2}>
+              {session.tagline ?? session.subtitle}
+            </Text>
+          </View>
+
+          {/* Flash badge if applicable */}
+          {session.flashEnabled && (
+            <View style={styles.flashRow}>
+              <View style={[styles.flashDot, { backgroundColor: "#00e5ff" }]} />
+              <Text style={styles.flashLabel}>Torche  {session.flashHz} Hz</Text>
+            </View>
+          )}
+        </View>
+
+        {/* ── Play button — right-edge ── */}
+        <View style={styles.playSide}>
+          <View style={[styles.playBtn, { borderColor: col0 + "55", backgroundColor: col0 + "18" }]}>
+            <SymIcon name="play" size={16} color="#ffffff" />
+          </View>
+          <Text style={[styles.playLabel, { color: "#ffffff30" }]}>
+            {session.breathPattern.label}
+          </Text>
+        </View>
+
+      </View>
+    </Pressable>
   );
 }
 
-export function useSubscription() {
-  const ctx = useContext(SubscriptionContext);
-  if (!ctx) throw new Error("useSubscription must be used inside SubscriptionProvider");
-  return ctx;
-}
+const styles = StyleSheet.create({
+  container: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+  },
+  pressed: {
+    opacity: 0.88,
+    transform: [{ scale: 0.985 }],
+  },
+  card: {
+    borderRadius: 18,
+    height: 152,
+    flexDirection: "row",
+    overflow: "hidden",
+  },
+  watermark: {
+    position: "absolute",
+    bottom: -12,
+    right: 52,
+    fontSize: 120,
+    fontWeight: "900",
+    lineHeight: 120,
+  },
 
-export const MAX_FREE = MAX_FREE_WEEKLY;
+  content: {
+    flex: 1,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    justifyContent: "space-between",
+  },
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  waveChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  waveChipSym:   { fontSize: 11, fontWeight: "800" },
+  waveChipLabel: { fontSize: 9,  fontWeight: "600", letterSpacing: 0.5 },
+
+  topRight:  { flexDirection: "row", alignItems: "center", gap: 5 },
+  durChip: {
+    borderWidth: 1, borderRadius: 6,
+    paddingHorizontal: 7, paddingVertical: 3,
+  },
+  durText: { fontSize: 9, color: "#ffffffaa", letterSpacing: 0.8, fontWeight: "600" },
+  recChip: {
+    width: 22, height: 22, borderRadius: 6,
+    borderWidth: 1, alignItems: "center", justifyContent: "center",
+  },
+  recText: { fontSize: 10, fontWeight: "700" },
+
+  nameBlock: { gap: 3 },
+  name: {
+    fontSize: 20,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    color: "#ffffffee",
+  },
+  tagline: {
+    fontSize: 11,
+    letterSpacing: 0.4,
+    lineHeight: 16,
+  },
+
+  flashRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  flashDot:   { width: 4, height: 4, borderRadius: 2 },
+  flashLabel: { fontSize: 9, color: "#00e5ff80", letterSpacing: 0.8 },
+
+  playSide: {
+    width: 60,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingRight: 14,
+  },
+  playBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  playLabel: {
+    fontSize: 7,
+    letterSpacing: 0.6,
+    textAlign: "center",
+    lineHeight: 10,
+  },
+});

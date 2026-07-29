@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
+  Switch,
   Platform,
 } from "react-native";
 import { router } from "expo-router";
@@ -13,153 +14,301 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useColors } from "@/hooks/useColors";
-import { SessionCard } from "@/components/SessionCard";
-import { SESSIONS } from "@/data/sessions";
 import { useApp } from "@/context/AppContext";
+import { SESSIONS } from "@/data/sessions";
+import { ActivityChart } from "@/components/charts/ActivityChart";
+import { WaveChart } from "@/components/charts/WaveChart";
+import { RatingChart } from "@/components/charts/RatingChart";
+import { HiddenActivationWrapper } from "@/components/HiddenActivation";
+import { useSubscription } from "@/context/SubscriptionContext";
+import { useLanguage } from "@/context/LanguageContext";
 
-function getRecommendedId(hour: number, profileId: string | null): string {
-  if (profileId) return profileId;
-  if (hour >= 21 || hour < 5) return "nid";
-  if (hour >= 5 && hour < 10) return "respiration";
-  if (hour >= 10 && hour < 18) return "reboot";
-  return "cristal";
+function IntensitySlider({ value, onChange, color }: { value: number; onChange: (v: number) => void; color: string }) {
+  const steps = [0.2, 0.4, 0.6, 0.8, 1.0];
+  const colors = useColors();
+  return (
+    <View style={sliderStyles.container}>
+      {steps.map((step) => (
+        <Pressable
+          key={step}
+          onPress={() => {
+            if (Platform.OS !== "web") Haptics.selectionAsync();
+            onChange(step);
+          }}
+          style={[sliderStyles.step, { backgroundColor: value >= step ? color : colors.border, height: 4 + step * 14 }]}
+        />
+      ))}
+    </View>
+  );
 }
 
-export default function SessionsScreen() {
+const sliderStyles = StyleSheet.create({
+  container: { flexDirection: "row", alignItems: "flex-end", gap: 6, height: 20 },
+  step: { width: 16, borderRadius: 3 },
+});
+
+export default function ProfileScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { profile } = useApp();
+  const { profile, preferences, updatePreferences, records } = useApp();
+  const { isPremium, freeSessionsLeft } = useSubscription();
+  const { t } = useLanguage();
 
-  const hour          = new Date().getHours();
-  const recommendedId = getRecommendedId(hour, profile.favoriteSessionId);
-  const recommended   = SESSIONS.find((s) => s.id === recommendedId);
-  const others        = SESSIONS.filter((s) => s.id !== recommendedId);
+  const favoriteSession = profile.favoriteSessionId
+    ? SESSIONS.find((s) => s.id === profile.favoriteSessionId)
+    : null;
 
-  const topPad = Platform.OS === "web" ? 44 : insets.top;
-  const botPad = Platform.OS === "web" ? 34 : insets.bottom;
+  const timeLabel: Record<string, string> = {
+    morning: t.morning,
+    afternoon: t.afternoon,
+    evening: t.evening,
+    night: t.night,
+  };
 
-  const heroColor = recommended?.colors[1] ?? "#1a0070";
+  const topPadding = Platform.OS === "web" ? 67 : insets.top;
+  const bottomPadding = Platform.OS === "web" ? 34 : insets.bottom;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-
-      {/* ── Hero header ── */}
-      <View style={[styles.heroWrap, { paddingTop: topPad }]}>
-        <LinearGradient
-          colors={[heroColor + "60", heroColor + "18", "transparent"] as [string, string, string]}
-          style={StyleSheet.absoluteFill}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        />
-
-        {/* Back button */}
+      <View style={[styles.header, { paddingTop: topPadding + 8, borderBottomColor: colors.border }]}>
         <Pressable
           onPress={() => {
             if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             router.back();
           }}
           style={styles.backBtn}
-          hitSlop={12}
         >
-          <SymIcon name="chevron-back" size={22} color="#ffffff90" />
+          <SymIcon name="chevron-back" size={24} color={colors.foreground} />
         </Pressable>
-
-        {/* Title block */}
-        <View style={styles.heroContent}>
-          <Text style={styles.heroEye}>— RITUELS BIOADAPTIFS —</Text>
-          <Text style={styles.heroTitle}>Choisissez{"\n"}votre état.</Text>
-          <Text style={[styles.heroSub, { color: heroColor }]}>
-            {SESSIONS.length} séances  ·  binaural  ·  respiratoire
+        <HiddenActivationWrapper>
+          <Text style={[styles.title, { color: colors.foreground }]}>{t.profileTitle}</Text>
+        </HiddenActivationWrapper>
+        <Pressable
+          onPress={() => {
+            if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            router.push("/paywall");
+          }}
+          style={[
+            styles.premiumBtn,
+            isPremium
+              ? { borderColor: colors.secondary + "50", backgroundColor: colors.secondary + "10" }
+              : { borderColor: colors.border, backgroundColor: colors.card },
+          ]}
+        >
+          <SymIcon
+            name={isPremium ? "diamond" : "diamond-outline"}
+            size={12}
+            color={isPremium ? colors.secondary : colors.mutedForeground}
+          />
+          <Text style={[styles.premiumBtnText, { color: isPremium ? colors.secondary : colors.mutedForeground }]}>
+            {isPremium ? "Premium" : `${freeSessionsLeft}/3`}
           </Text>
-        </View>
+        </Pressable>
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.list, { paddingBottom: botPad + 30 }]}
+        contentContainerStyle={[styles.content, { paddingBottom: bottomPadding + 40 }]}
         showsVerticalScrollIndicator={false}
+        style={{ backgroundColor: colors.background }}
       >
-        {/* Recommended */}
-        {recommended && (
-          <>
-            <Text style={[styles.sectionEye, { color: heroColor }]}>★  Recommandé maintenant</Text>
-            <SessionCard
-              key={recommended.id}
-              session={recommended}
-              onPress={() => {
-                if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                router.push({ pathname: "/active", params: { id: recommended.id } });
-              }}
-              isRecommended
-            />
-          </>
-        )}
-
-        {/* All others */}
-        <Text style={styles.sectionEye}>Toutes les séances</Text>
-        {others.map((session) => (
-          <SessionCard
-            key={session.id}
-            session={session}
-            onPress={() => {
-              if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              router.push({ pathname: "/active", params: { id: session.id } });
-            }}
+        <View style={[styles.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <LinearGradient
+            colors={[colors.primary + "10", "transparent"] as [string, string]}
+            style={[StyleSheet.absoluteFill, { borderRadius: 20 }]}
           />
-        ))}
+          <View style={[styles.profileIcon, { backgroundColor: colors.primary + "15", borderColor: colors.primary + "30" }]}>
+            <SymIcon name="person" size={28} color={colors.primary} />
+          </View>
+          <View style={styles.profileInfo}>
+            <Text style={[styles.profileTitle, { color: colors.foreground }]}>{t.explorer}</Text>
+            <Text style={[styles.profileSub, { color: colors.mutedForeground }]}>
+              {profile.totalVoyages} {profile.totalVoyages > 1 ? t.voyagePlural : t.voyageOne}
+            </Text>
+          </View>
+          {profile.currentStreak > 0 && (
+            <View style={[styles.streakBadge, { backgroundColor: colors.amber + "15", borderColor: colors.amber + "40" }]}>
+              <SymIcon name="flame" size={14} color={colors.amber} />
+              <Text style={[styles.streakText, { color: colors.amber }]}>{profile.currentStreak}j</Text>
+            </View>
+          )}
+        </View>
+
+        <ActivityChart records={records} />
+        <WaveChart records={records} />
+        <RatingChart records={records} />
+
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>{t.relaxProfile}</Text>
+          <Row label={t.totalSessions} value={`${profile.totalVoyages}`} colors={colors} />
+          <Row label={t.totalTime} value={`${profile.totalMinutes} ${t.minAbbr}`} colors={colors} />
+          {favoriteSession && (
+            <Row label={t.favSession} value={favoriteSession.name} colors={colors} />
+          )}
+          {profile.preferredTimeOfDay && (
+            <Row label={t.preferredMoment} value={timeLabel[profile.preferredTimeOfDay] ?? ""} colors={colors} />
+          )}
+        </View>
+
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>{t.sensoryPrefs}</Text>
+
+          {/* Vibrations */}
+          <View style={styles.prefRow}>
+            <SymIcon name="phone-portrait-outline" size={18} color={colors.primary + "80"} style={styles.prefIcon} />
+            <View style={styles.prefTexts}>
+              <Text style={[styles.prefLabel, { color: colors.foreground }]}>{t.vibrations}</Text>
+              <Text style={[styles.prefSub, { color: colors.mutedForeground }]}>{t.hapticIntensityLabel}</Text>
+            </View>
+            <IntensitySlider
+              value={preferences.hapticIntensity}
+              onChange={(v) => updatePreferences({ hapticIntensity: v })}
+              color={colors.primary}
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+          {/* Lumière */}
+          <View style={styles.prefRow}>
+            <SymIcon name="bulb-outline" size={18} color={colors.secondary + "80"} style={styles.prefIcon} />
+            <View style={styles.prefTexts}>
+              <Text style={[styles.prefLabel, { color: colors.foreground }]}>{t.lightLabel}</Text>
+              <Text style={[styles.prefSub, { color: colors.mutedForeground }]}>{t.chromaticIntensity}</Text>
+            </View>
+            <IntensitySlider
+              value={preferences.lightIntensity}
+              onChange={(v) => updatePreferences({ lightIntensity: v })}
+              color={colors.secondary}
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+          {/* Guide respiratoire */}
+          <View style={styles.prefRow}>
+            <SymIcon name="leaf-outline" size={18} color={colors.accent + "80"} style={styles.prefIcon} />
+            <View style={styles.prefTexts}>
+              <Text style={[styles.prefLabel, { color: colors.foreground }]}>{t.breathGuideLabel}</Text>
+              <Text style={[styles.prefSub, { color: colors.mutedForeground }]}>{t.breathAnimLabel}</Text>
+            </View>
+            <Switch
+              value={preferences.breathingGuide}
+              onValueChange={(v) => {
+                if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                updatePreferences({ breathingGuide: v });
+              }}
+              trackColor={{ false: colors.muted, true: colors.primary + "80" }}
+              thumbColor={preferences.breathingGuide ? colors.primary : colors.mutedForeground}
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+          {/* Mode sanctuaire */}
+          <View style={styles.prefRow}>
+            <SymIcon name="moon-outline" size={18} color={colors.amber + "80"} style={styles.prefIcon} />
+            <View style={styles.prefTexts}>
+              <Text style={[styles.prefLabel, { color: colors.foreground }]}>{t.sanctuaryModeLabel}</Text>
+              <Text style={[styles.prefSub, { color: colors.mutedForeground }]}>{t.noNotifLabel}</Text>
+            </View>
+            <Switch
+              value={preferences.sanctuaryMode}
+              onValueChange={(v) => {
+                if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                updatePreferences({ sanctuaryMode: v });
+              }}
+              trackColor={{ false: colors.muted, true: colors.accent + "80" }}
+              thumbColor={preferences.sanctuaryMode ? colors.accent : colors.mutedForeground}
+            />
+          </View>
+        </View>
+
+        {records.length > 0 && (
+          <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>{t.lastVoyages}</Text>
+            {records.slice(0, 5).map((record) => {
+              const date = new Date(record.completedAt).toLocaleDateString(
+                t.langLabel === "EN" ? "en-GB" : t.langLabel === "ES" ? "es-ES" : "fr-FR",
+                { day: "numeric", month: "short" }
+              );
+              return (
+                <View key={record.id} style={styles.recordRow}>
+                  <View style={styles.recordInfo}>
+                    <Text style={[styles.recordName, { color: colors.foreground }]}>{record.sessionName}</Text>
+                    <Text style={[styles.recordDate, { color: colors.mutedForeground }]}>
+                      {date} · {Math.floor(record.duration / 60)}{t.minAbbr}{record.duration % 60 > 0 ? `${record.duration % 60}s` : ""}
+                    </Text>
+                  </View>
+                  {record.rating > 0 && (
+                    <View style={styles.ratingRow}>
+                      {Array.from({ length: record.rating }, (_, i) => (
+                        <SymIcon key={i} name="star" size={12} color={colors.amber} />
+                      ))}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        )}
       </ScrollView>
+    </View>
+  );
+}
+
+function Row({ label, value, colors }: { label: string; value: string; colors: ReturnType<typeof useColors> }) {
+  return (
+    <View style={styles.dataRow}>
+      <Text style={[styles.dataLabel, { color: colors.mutedForeground }]}>{label}</Text>
+      <Text style={[styles.dataValue, { color: colors.foreground }]}>{value}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-
-  heroWrap: {
-    paddingBottom: 24,
-    paddingHorizontal: 20,
-    overflow: "hidden",
+  header: {
+    flexDirection: "row", alignItems: "flex-end", gap: 12,
+    paddingHorizontal: 16, paddingBottom: 16, borderBottomWidth: 1,
   },
-  backBtn: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 8,
-    marginLeft: -4,
+  backBtn: { padding: 4, marginBottom: 2 },
+  title: { fontSize: 24, fontWeight: "600", flex: 1 },
+  premiumBtn: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, borderWidth: 1, marginBottom: 2,
   },
-  heroContent: {
-    gap: 6,
+  premiumBtnText: { fontSize: 11, fontWeight: "600", letterSpacing: 0.5 },
+  content: { padding: 20, gap: 14 },
+  profileCard: {
+    flexDirection: "row", alignItems: "center", gap: 16, padding: 20,
+    borderRadius: 20, borderWidth: 1, overflow: "hidden", position: "relative",
   },
-  heroEye: {
-    fontSize: 9,
-    fontWeight: "700",
-    letterSpacing: 3,
-    color: "#ffffff35",
-    textTransform: "uppercase",
+  profileIcon: {
+    width: 56, height: 56, borderRadius: 28, borderWidth: 1,
+    alignItems: "center", justifyContent: "center",
   },
-  heroTitle: {
-    fontSize: 34,
-    fontWeight: "700",
-    letterSpacing: -0.5,
-    color: "#ffffffee",
-    lineHeight: 40,
+  profileInfo: { flex: 1 },
+  profileTitle: { fontSize: 18, fontWeight: "600" },
+  profileSub: { fontSize: 13, marginTop: 2 },
+  streakBadge: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, borderWidth: 1,
   },
-  heroSub: {
-    fontSize: 11,
-    letterSpacing: 0.6,
-    marginTop: 2,
-  },
-
-  list: { paddingTop: 8 },
-
-  sectionEye: {
-    fontSize: 9,
-    fontWeight: "700",
-    letterSpacing: 2,
-    color: "#ffffff30",
-    textTransform: "uppercase",
-    marginHorizontal: 22,
-    marginBottom: 10,
-    marginTop: 20,
-  },
+  streakText: { fontSize: 13, fontWeight: "600" },
+  section: { borderRadius: 20, borderWidth: 1, padding: 20, gap: 14 },
+  sectionTitle: { fontSize: 10, letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 },
+  dataRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  dataLabel: { fontSize: 14 },
+  dataValue: { fontSize: 14, fontWeight: "500" },
+  prefRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  prefIcon: { flexShrink: 0 },
+  prefTexts: { flex: 1 },
+  prefLabel: { fontSize: 14, fontWeight: "500" },
+  prefSub: { fontSize: 12, marginTop: 2 },
+  divider: { height: 1 },
+  recordRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  recordInfo: { flex: 1, gap: 2 },
+  recordName: { fontSize: 14, fontWeight: "500" },
+  recordDate: { fontSize: 12, marginTop: 2 },
+  ratingRow: { flexDirection: "row", gap: 2 },
 });

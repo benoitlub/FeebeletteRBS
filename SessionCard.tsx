@@ -1,122 +1,83 @@
 import React, { useEffect } from "react";
-import { View, Text, StyleSheet, Dimensions } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import Animated, {
   useSharedValue,
   withTiming,
   Easing,
   useAnimatedStyle,
-  interpolate,
 } from "react-native-reanimated";
 import { useColors } from "@/hooks/useColors";
 import { SessionRecord } from "@/types";
+import { SESSIONS } from "@/data/sessions";
 
-const { width } = Dimensions.get("window");
-const DAYS = ["L", "M", "M", "J", "V", "S", "D"];
+const WAVE_META = {
+  delta: { label: "Delta", sub: "0.5–4 Hz · Sommeil profond", color: "#7c4dff" },
+  theta: { label: "Thêta", sub: "4–8 Hz · Méditation", color: "#9c6dff" },
+  alpha: { label: "Alpha", sub: "8–14 Hz · Relaxation", color: "#00e5ff" },
+};
 
-function getWeekDays(): Date[] {
-  const today = new Date();
-  const day = today.getDay();
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
-  monday.setHours(0, 0, 0, 0);
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    return d;
-  });
+function AnimatedBar({ pct, color }: { pct: number; color: string }) {
+  const width = useSharedValue(0);
+  useEffect(() => {
+    width.value = withTiming(pct, { duration: 900, easing: Easing.out(Easing.cubic) });
+  }, [pct]);
+  const style = useAnimatedStyle(() => ({
+    width: `${width.value}%`,
+  }));
+  return (
+    <View style={[styles.barTrack]}>
+      <Animated.View style={[styles.bar, { backgroundColor: color }, style]} />
+    </View>
+  );
 }
 
 interface Props {
   records: SessionRecord[];
 }
 
-function Bar({ count, max, dayLabel, isToday, color }: {
-  count: number;
-  max: number;
-  dayLabel: string;
-  isToday: boolean;
-  color: string;
-}) {
-  const heightAnim = useSharedValue(0);
-  const targetHeight = max === 0 ? 0 : (count / max) * 72;
-
-  useEffect(() => {
-    heightAnim.value = withTiming(targetHeight, {
-      duration: 800,
-      easing: Easing.out(Easing.cubic),
-    });
-  }, [targetHeight]);
-
-  const barStyle = useAnimatedStyle(() => ({
-    height: heightAnim.value,
-    opacity: interpolate(heightAnim.value, [0, targetHeight || 1], [0, 1]),
-  }));
-
-  return (
-    <View style={styles.barWrapper}>
-      <View style={styles.barTrack}>
-        <Animated.View
-          style={[
-            styles.bar,
-            { backgroundColor: count > 0 ? color : "transparent" },
-            barStyle,
-          ]}
-        />
-      </View>
-      <Text style={[
-        styles.barDay,
-        { color: isToday ? color : "#ffffff40" },
-        isToday && styles.barDayToday,
-      ]}>
-        {dayLabel}
-      </Text>
-      {count > 0 && (
-        <Text style={[styles.barCount, { color: color + "cc" }]}>{count}</Text>
-      )}
-    </View>
-  );
-}
-
-export function ActivityChart({ records }: Props) {
+export function WaveChart({ records }: Props) {
   const colors = useColors();
-  const weekDays = getWeekDays();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
 
-  const counts = weekDays.map((day) => {
-    const nextDay = new Date(day);
-    nextDay.setDate(day.getDate() + 1);
-    return records.filter(
-      (r) => r.completedAt >= day.getTime() && r.completedAt < nextDay.getTime()
-    ).length;
+  const counts: Record<string, number> = { delta: 0, theta: 0, alpha: 0 };
+  records.forEach((r) => {
+    const session = SESSIONS.find((s) => s.id === r.sessionId);
+    if (session) {
+      counts[session.waveType] = (counts[session.waveType] ?? 0) + 1;
+    }
   });
 
-  const maxCount = Math.max(...counts, 1);
-  const totalThisWeek = counts.reduce((a, b) => a + b, 0);
+  const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.foreground }]}>Activité hebdomadaire</Text>
-        <Text style={[styles.subtitle, { color: colors.accent }]}>
-          {totalThisWeek} séance{totalThisWeek !== 1 ? "s" : ""} cette semaine
-        </Text>
-      </View>
-      <View style={styles.chart}>
-        {counts.map((count, i) => {
-          const isToday = weekDays[i]!.getTime() === today.getTime();
-          return (
-            <Bar
-              key={i}
-              count={count}
-              max={maxCount}
-              dayLabel={DAYS[i]!}
-              isToday={isToday}
-              color={colors.primary}
-            />
-          );
-        })}
-      </View>
+      <Text style={[styles.title, { color: colors.foreground }]}>
+        Distribution des ondes
+      </Text>
+      <Text style={[styles.sub, { color: colors.mutedForeground }]}>
+        {total} séance{total !== 1 ? "s" : ""} analysée{total !== 1 ? "s" : ""}
+      </Text>
+
+      {Object.entries(WAVE_META).map(([key, meta]) => {
+        const count = counts[key] ?? 0;
+        const pct = Math.round((count / total) * 100);
+        return (
+          <View key={key} style={styles.row}>
+            <View style={styles.rowHeader}>
+              <View style={[styles.dot, { backgroundColor: meta.color }]} />
+              <View style={styles.rowLabels}>
+                <Text style={[styles.waveLabel, { color: colors.foreground }]}>
+                  {meta.label}
+                </Text>
+                <Text style={[styles.waveSub, { color: colors.mutedForeground }]}>
+                  {meta.sub}
+                </Text>
+              </View>
+              <Text style={[styles.pct, { color: meta.color }]}>{pct}%</Text>
+            </View>
+            <AnimatedBar pct={pct} color={meta.color} />
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -128,53 +89,57 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 16,
   },
-  header: {
-    gap: 2,
-  },
   title: {
     fontSize: 14,
     fontWeight: "600",
     letterSpacing: 0.5,
   },
-  subtitle: {
-    fontSize: 12,
+  sub: {
+    fontSize: 11,
     letterSpacing: 0.3,
+    marginTop: -10,
   },
-  chart: {
+  row: {
+    gap: 8,
+  },
+  rowHeader: {
     flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-    height: 100,
-    gap: 6,
-  },
-  barWrapper: {
-    flex: 1,
     alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 4,
+    gap: 10,
   },
-  barTrack: {
-    flex: 1,
-    width: "100%",
-    justifyContent: "flex-end",
+  dot: {
+    width: 8,
+    height: 8,
     borderRadius: 4,
   },
-  bar: {
-    width: "100%",
-    borderRadius: 5,
-    minHeight: 3,
+  rowLabels: {
+    flex: 1,
+    gap: 1,
   },
-  barDay: {
-    fontSize: 10,
+  waveLabel: {
+    fontSize: 13,
     fontWeight: "500",
+    letterSpacing: 0.3,
+  },
+  waveSub: {
+    fontSize: 10,
+    letterSpacing: 0.3,
+  },
+  pct: {
+    fontSize: 13,
+    fontWeight: "600",
     letterSpacing: 0.5,
+    minWidth: 36,
+    textAlign: "right",
   },
-  barDayToday: {
-    fontWeight: "700",
+  barTrack: {
+    height: 6,
+    backgroundColor: "#ffffff10",
+    borderRadius: 3,
+    overflow: "hidden",
   },
-  barCount: {
-    fontSize: 9,
-    position: "absolute",
-    top: -14,
+  bar: {
+    height: "100%",
+    borderRadius: 3,
   },
 });

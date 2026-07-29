@@ -1,70 +1,76 @@
-{
-  "name": "@workspace/blacklace-island",
-  "version": "0.0.0",
-  "private": true,
-  "main": "expo-router/entry",
-  "scripts": {
-    "dev": "EXPO_PACKAGER_PROXY_URL=https://$REPLIT_EXPO_DEV_DOMAIN EXPO_PUBLIC_DOMAIN=$REPLIT_DEV_DOMAIN EXPO_PUBLIC_REPL_ID=$REPL_ID REACT_NATIVE_PACKAGER_HOSTNAME=$REPLIT_DEV_DOMAIN pnpm exec expo start --localhost --port $PORT",
-    "build": "node scripts/build.js",
-    "serve": "node server/serve.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "eas:login": "pnpm exec eas login",
-    "eas:build:preview": "pnpm exec eas build --platform android --profile preview",
-    "eas:build:production": "pnpm exec eas build --platform android --profile production",
-    "eas:submit": "pnpm exec eas submit --platform android --profile production"
-  },
-  "devDependencies": {
-    "@babel/core": "^7.25.2",
-    "@expo-google-fonts/inter": "^0.4.0",
-    "@expo/cli": "54.0.23",
-    "@expo/ngrok": "^4.1.0",
-    "@expo/vector-icons": "^15.1.1",
-    "@react-native-async-storage/async-storage": "2.2.0",
-    "@stardazed/streams-text-encoding": "^1.0.2",
-    "@tanstack/react-query": "catalog:",
-    "@types/react": "~19.1.10",
-    "@types/react-dom": "~19.1.7",
-    "@ungap/structured-clone": "^1.3.0",
-    "@workspace/api-client-react": "workspace:*",
-    "babel-plugin-react-compiler": "^19.0.0-beta-e993439-20250117",
-    "eas-cli": "^18.9.1",
-    "expo": "~54.0.27",
-    "expo-blur": "~15.0.8",
-    "expo-constants": "~18.0.11",
-    "expo-font": "~14.0.10",
-    "expo-glass-effect": "~0.1.4",
-    "expo-haptics": "~15.0.8",
-    "expo-image": "~3.0.11",
-    "expo-image-picker": "~17.0.9",
-    "expo-linear-gradient": "~15.0.8",
-    "expo-linking": "~8.0.10",
-    "expo-location": "~19.0.8",
-    "expo-router": "~6.0.17",
-    "expo-splash-screen": "~31.0.12",
-    "expo-status-bar": "~3.0.9",
-    "expo-symbols": "~1.0.8",
-    "expo-system-ui": "~6.0.9",
-    "expo-web-browser": "~15.0.10",
-    "react": "catalog:",
-    "react-dom": "catalog:",
-    "react-native": "0.81.5",
-    "react-native-gesture-handler": "~2.28.0",
-    "react-native-keyboard-controller": "1.18.5",
-    "react-native-reanimated": "~4.1.1",
-    "react-native-safe-area-context": "~5.6.0",
-    "react-native-screens": "~4.16.0",
-    "react-native-svg": "15.12.1",
-    "react-native-web": "^0.21.0",
-    "react-native-worklets": "0.5.1",
-    "typescript": "~5.9.2",
-    "zod": "catalog:",
-    "zod-validation-error": "^3.4.0"
-  },
-  "dependencies": {
-    "expo-asset": "^55.0.16",
-    "expo-av": "^16.0.8",
-    "expo-camera": "^17.0.10",
-    "expo-file-system": "^55.0.17",
-    "expo-sensors": "^55.0.13"
+const SAMPLE_RATE = 22050;
+const DURATION = 6;
+
+function writeString(view: DataView, offset: number, str: string) {
+  for (let i = 0; i < str.length; i++) {
+    view.setUint8(offset + i, str.charCodeAt(i));
   }
+}
+
+function uint8ToBase64(bytes: Uint8Array): string {
+  const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let result = "";
+  let i = 0;
+  while (i < bytes.length - 2) {
+    const b0 = bytes[i++]!;
+    const b1 = bytes[i++]!;
+    const b2 = bytes[i++]!;
+    result +=
+      CHARS[b0 >> 2]! +
+      CHARS[((b0 & 3) << 4) | (b1 >> 4)]! +
+      CHARS[((b1 & 15) << 2) | (b2 >> 6)]! +
+      CHARS[b2 & 63]!;
+  }
+  if (i < bytes.length) {
+    const b0 = bytes[i++]!;
+    const b1 = i < bytes.length ? bytes[i]! : 0;
+    result +=
+      CHARS[b0 >> 2]! +
+      CHARS[((b0 & 3) << 4) | (b1 >> 4)]! +
+      (i < bytes.length ? CHARS[((b1 & 15) << 2)]! : "=") +
+      "=";
+  }
+  return result;
+}
+
+export function generateBinauralWAVBase64(leftFreq: number, rightFreq: number): string {
+  const numSamples = SAMPLE_RATE * DURATION;
+  const numChannels = 2;
+  const bitsPerSample = 16;
+  const byteRate = SAMPLE_RATE * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = numSamples * blockAlign;
+
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(view, 8, "WAVE");
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, SAMPLE_RATE, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(view, 36, "data");
+  view.setUint32(40, dataSize, true);
+
+  const amplitude = 0.4;
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / SAMPLE_RATE;
+    const fade = Math.min(1, Math.min(t * 2, (DURATION - t) * 2));
+    const left = amplitude * fade * Math.sin(2 * Math.PI * leftFreq * t);
+    const right = amplitude * fade * Math.sin(2 * Math.PI * rightFreq * t);
+    view.setInt16(44 + i * 4, Math.round(left * 32767), true);
+    view.setInt16(44 + i * 4 + 2, Math.round(right * 32767), true);
+  }
+
+  return uint8ToBase64(new Uint8Array(buffer));
+}
+
+export function getCacheKey(leftFreq: number, rightFreq: number): string {
+  return `binaural_${leftFreq}_${rightFreq}.wav`;
 }

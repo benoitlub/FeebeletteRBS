@@ -1,29 +1,52 @@
-import {
-  KeyboardAwareScrollView,
-  KeyboardAwareScrollViewProps,
-} from "react-native-keyboard-controller";
-import { Platform, ScrollView, ScrollViewProps } from "react-native";
+import React from "react";
+import { View } from "react-native";
+import Svg, { Circle } from "react-native-svg";
+import Animated, {
+  useAnimatedProps,
+} from "react-native-reanimated";
+import { useColors } from "@/hooks/useColors";
 
-type Props = KeyboardAwareScrollViewProps & ScrollViewProps;
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-export function KeyboardAwareScrollViewCompat({
-  children,
-  keyboardShouldPersistTaps = "handled",
-  ...props
-}: Props) {
-  if (Platform.OS === "web") {
-    return (
-      <ScrollView keyboardShouldPersistTaps={keyboardShouldPersistTaps} {...props}>
-        {children}
-      </ScrollView>
-    );
-  }
+interface Props {
+  progress: Animated.SharedValue<number>;
+  size: number;
+  strokeWidth?: number;
+  color?: string;
+}
+
+export function ProgressRing({ progress, size, strokeWidth = 2, color }: Props) {
+  const colors = useColors();
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+
+  const animatedProps = useAnimatedProps(() => ({
+    strokeDashoffset: circumference * (1 - progress.value),
+  }));
+
   return (
-    <KeyboardAwareScrollView
-      keyboardShouldPersistTaps={keyboardShouldPersistTaps}
-      {...props}
-    >
-      {children}
-    </KeyboardAwareScrollView>
+    <View style={{ width: size, height: size }}>
+      <Svg width={size} height={size} style={{ transform: [{ rotate: "-90deg" }] }}>
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={colors.border}
+          strokeWidth={strokeWidth}
+          fill="none"
+        />
+        <AnimatedCircle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={color ?? colors.primary}
+          strokeWidth={strokeWidth}
+          fill="none"
+          strokeDasharray={circumference}
+          animatedProps={animatedProps}
+          strokeLinecap="round"
+        />
+      </Svg>
+    </View>
   );
 }

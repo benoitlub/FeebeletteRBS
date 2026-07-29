@@ -1,97 +1,262 @@
+import { SymIcon } from "@/components/SymIcon";
+import React, { useState } from "react";
 import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-} from "@expo-google-fonts/inter";
-import { useFonts } from "expo-font";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { KeyboardProvider } from "react-native-keyboard-controller";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+  View,
+  Text,
+  Image,
+  StyleSheet,
+  Pressable,
+  TextInput,
+  ScrollView,
+  Platform,
+} from "react-native";
+import { router, useLocalSearchParams } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
+import { useColors } from "@/hooks/useColors";
+import { useApp } from "@/context/AppContext";
+import { getSession } from "@/data/sessions";
+import { useLanguage } from "@/context/LanguageContext";
 
-// Canonical v15 font loading — spread .font from each icon set.
-// createIconSet() builds { [fontName]: <TTF asset> } with the exact family name
-// ('ionicons', 'feather', 'material') so React Native finds the glyph correctly.
-import Ionicons from "@expo/vector-icons/Ionicons";
-import Feather from "@expo/vector-icons/Feather";
-import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+// ── Brand assets ───────────────────────────────────────────────────────────────
+const FAIRY_IMG = require("../assets/images/fairy.png");
+const BUBBLE_IMGS: Record<string, number> = {
+  respiration: require("../assets/images/bubble_lotus.png") as number,
+  nid:         require("../assets/images/bubble_moon.png") as number,
+  cristal:     require("../assets/images/bubble_star.png") as number,
+  reboot:      require("../assets/images/bubble_wave.png") as number,
+  etincelle:   require("../assets/images/bubble_feather.png") as number,
+};
 
-import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { AppProvider } from "@/context/AppContext";
-import { SubscriptionProvider } from "@/context/SubscriptionContext";
-import { LanguageProvider } from "@/context/LanguageContext";
-import { ThemeProvider, useTheme } from "@/context/ThemeContext";
-import { AmbientAudioProvider } from "@/context/AmbientAudioContext";
+export default function JournalScreen() {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const { t } = useLanguage();
+  const { id, elapsed } = useLocalSearchParams<{ id: string; elapsed?: string }>();
+  const { addRecord } = useApp();
 
-SplashScreen.preventAutoHideAsync();
+  const session = getSession(id ?? "ancrage");
 
-const queryClient = new QueryClient();
+  const [rating, setRating] = useState(0);
+  const [note, setNote] = useState("");
+  const [saved, setSaved] = useState(false);
 
-function RootLayoutNav() {
-  const { isDark } = useTheme();
-  const bg = isDark ? "#07071a" : "#eeeef8";
+  const topPadding = Platform.OS === "web" ? 67 : insets.top;
+  const bottomPadding = Platform.OS === "web" ? 34 : insets.bottom;
+
+  const handleRate = (val: number) => {
+    setRating(val);
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const handleSave = async () => {
+    if (!session) { router.replace("/"); return; }
+    const hour = new Date().getHours();
+    const timeOfDay =
+      hour >= 5 && hour < 12 ? "morning"
+      : hour >= 12 && hour < 17 ? "afternoon"
+      : hour >= 17 && hour < 21 ? "evening"
+      : "night";
+
+    const actualDuration = elapsed ? Math.max(10, parseInt(elapsed)) : session.duration;
+    await addRecord({
+      id: `${Date.now().toString()}-${Math.random().toString(36).substr(2, 9)}`,
+      sessionId: session.id,
+      sessionName: session.name,
+      completedAt: Date.now(),
+      duration: actualDuration,
+      rating,
+      note,
+      timeOfDay,
+      intensity: 0.7,
+    });
+
+    if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setSaved(true);
+    setTimeout(() => router.replace("/"), 1200);
+  };
+
+  const waveColor =
+    session?.waveType === "delta" ? colors.secondary
+    : session?.waveType === "theta" ? "#9c6dff"
+    : colors.primary;
+
+  const ratingLabels = [t.ratingHard, t.ratingOk, t.ratingGood, t.ratingVeryGood, t.ratingExcellent];
+
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        animation: "fade",
-        contentStyle: { backgroundColor: bg },
-      }}
-    >
-      <Stack.Screen name="(tabs)" options={{ headerShown: false, contentStyle: { backgroundColor: bg } }} />
-      <Stack.Screen name="sessions" options={{ headerShown: false, animation: "slide_from_bottom", contentStyle: { backgroundColor: bg } }} />
-      <Stack.Screen name="active"   options={{ headerShown: false, animation: "fade",              contentStyle: { backgroundColor: bg } }} />
-      <Stack.Screen name="journal"  options={{ headerShown: false, animation: "slide_from_bottom", contentStyle: { backgroundColor: bg } }} />
-      <Stack.Screen name="profile"  options={{ headerShown: false, animation: "slide_from_right",  contentStyle: { backgroundColor: bg } }} />
-      <Stack.Screen name="paywall"  options={{ headerShown: false, animation: "slide_from_bottom", contentStyle: { backgroundColor: bg }, presentation: "modal" }} />
-    </Stack>
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+      <LinearGradient
+        colors={[session?.colors[0] + "40" ?? "#08001e40", colors.background] as [string, string]}
+        style={StyleSheet.absoluteFill}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 0.6 }}
+      />
+
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: topPadding + 20, paddingBottom: bottomPadding + 40 }]}
+        keyboardShouldPersistTaps="handled"
+        style={{ backgroundColor: "transparent" }}
+      >
+        {/* ── En-tête fée + bulle de séance ── */}
+        <View style={styles.heroHeader}>
+          {/* Fée belette silhouette */}
+          <Image
+            source={FAIRY_IMG}
+            style={styles.headerFairy}
+            resizeMode="contain"
+          />
+          {/* Bulle de séance en médaillon */}
+          {session && BUBBLE_IMGS[session.id] && (
+            <View style={[styles.bubbleMedallion, { borderColor: waveColor + "40", backgroundColor: waveColor + "10" }]}>
+              <Image
+                source={BUBBLE_IMGS[session.id]}
+                style={styles.bubbleMedallionImg}
+                resizeMode="contain"
+              />
+            </View>
+          )}
+          <View style={styles.headerText}>
+            {/* Symbole felbeletien */}
+            <Text style={[styles.felbeletienMark, { color: waveColor + "70" }]}>
+              {t.journalBrand}
+            </Text>
+            <Text style={[styles.completedLabel, { color: colors.mutedForeground }]}>
+              {t.journalSessionDone}{session?.name ?? "—"}
+            </Text>
+            <Text style={[styles.sessionNameText, { color: colors.foreground }]}>
+              {t.howDoYouFeel}
+            </Text>
+            <Text style={[styles.fairyClose, { color: waveColor + "aa" }]}>
+              "{t.journalTagline}"
+            </Text>
+            {/* Symbole feuchien — état apaisé */}
+            <Text style={[styles.feuchienMark, { color: waveColor + "45" }]}>
+              {t.journalFeuchien}
+            </Text>
+          </View>
+        </View>
+
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.cardTitle, { color: colors.foreground }]}>{t.howDoYouFeel}</Text>
+          <View style={styles.ratingRow}>
+            {[1, 2, 3, 4, 5].map((val) => (
+              <Pressable key={val} onPress={() => handleRate(val)} style={styles.starBtn}>
+                <SymIcon
+                  name={rating >= val ? "star" : "star-outline"}
+                  size={32}
+                  color={rating >= val ? waveColor : colors.mutedForeground}
+                />
+              </Pressable>
+            ))}
+          </View>
+          {rating > 0 && (
+            <Text style={[styles.ratingLabel, { color: colors.mutedForeground }]}>
+              {ratingLabels[rating - 1]}
+            </Text>
+          )}
+        </View>
+
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.cardTitle, { color: colors.foreground }]}>{t.reflection}</Text>
+          <TextInput
+            style={[styles.noteInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.muted }]}
+            placeholder={t.notesPlaceholder}
+            placeholderTextColor={colors.mutedForeground}
+            value={note}
+            onChangeText={setNote}
+            multiline
+            numberOfLines={4}
+            textAlignVertical="top"
+          />
+        </View>
+
+        <Pressable
+          onPress={handleSave}
+          style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] }]}
+        >
+          <LinearGradient
+            colors={[waveColor, colors.secondary] as [string, string]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.saveBtnGradient}
+          >
+            {saved ? (
+              <SymIcon name="checkmark" size={22} color={colors.background} />
+            ) : (
+              <>
+                <SymIcon name="sparkles" size={18} color={colors.background} />
+                <Text style={[styles.saveBtnText, { color: colors.background }]}>{t.journalReturnBtn}</Text>
+              </>
+            )}
+          </LinearGradient>
+        </Pressable>
+
+        <Pressable onPress={() => router.replace("/")} style={styles.skipBtn}>
+          <Text style={[styles.skipText, { color: colors.mutedForeground }]}>{t.skip}</Text>
+        </Pressable>
+      </ScrollView>
+    </View>
   );
 }
 
-export default function RootLayout() {
-  const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
-    // Canonical v15: spread the .font object from each icon set component.
-    // This guarantees the key matches the fontFamily used internally by createIconSet.
-    ...Ionicons.font,      // { ionicons: <TTF asset> }
-    ...Feather.font,       // { feather: <TTF asset> }
-    ...MaterialIcons.font, // { material: <TTF asset> }
-  });
+const styles = StyleSheet.create({
+  screen: { flex: 1 },
+  content: { paddingHorizontal: 24, gap: 16 },
 
-  useEffect(() => {
-    if (fontsLoaded || fontError) SplashScreen.hideAsync();
-  }, [fontsLoaded, fontError]);
-
-  if (!fontsLoaded && !fontError) return null;
-
-  return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <ErrorBoundary>
-          <QueryClientProvider client={queryClient}>
-            <LanguageProvider>
-              <AppProvider>
-                <SubscriptionProvider>
-                  <AmbientAudioProvider>
-                    <GestureHandlerRootView style={{ flex: 1, backgroundColor: "#07071a" }}>
-                      <KeyboardProvider>
-                        <RootLayoutNav />
-                      </KeyboardProvider>
-                    </GestureHandlerRootView>
-                  </AmbientAudioProvider>
-                </SubscriptionProvider>
-              </AppProvider>
-            </LanguageProvider>
-          </QueryClientProvider>
-        </ErrorBoundary>
-      </ThemeProvider>
-    </SafeAreaProvider>
-  );
-}
+  /* ── Completion hero ── */
+  heroHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 14,
+    marginBottom: 8,
+  },
+  headerFairy: {
+    width: 70,
+    height: 95,
+    opacity: 0.85,
+    flexShrink: 0,
+  },
+  bubbleMedallion: {
+    position: "absolute",
+    left: 44,
+    top: 52,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  bubbleMedallionImg: { width: 28, height: 28 },
+  headerText: { flex: 1, gap: 3 },
+  felbeletienMark: {
+    fontSize: 8, fontWeight: "800", letterSpacing: 3,
+    textTransform: "uppercase", marginBottom: 2,
+  },
+  feuchienMark: {
+    fontSize: 8, fontWeight: "600", letterSpacing: 3,
+    textTransform: "uppercase", marginTop: 6,
+  },
+  completedLabel: { fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase" },
+  sessionNameText: { fontSize: 20, fontWeight: "700", marginTop: 2, marginBottom: 4 },
+  fairyClose: { fontSize: 12, fontStyle: "italic", letterSpacing: 0.2, lineHeight: 18 },
+  card: { borderRadius: 20, borderWidth: 1, padding: 20, gap: 16 },
+  cardTitle: { fontSize: 16, fontWeight: "500", letterSpacing: 0.3 },
+  ratingRow: { flexDirection: "row", gap: 8 },
+  starBtn: { padding: 4 },
+  ratingLabel: { fontSize: 13, letterSpacing: 1, textTransform: "uppercase" },
+  noteInput: {
+    borderRadius: 12, borderWidth: 1, padding: 14,
+    fontSize: 14, lineHeight: 22, minHeight: 100,
+  },
+  saveBtn: { borderRadius: 18, overflow: "hidden", marginTop: 8 },
+  saveBtnGradient: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    paddingVertical: 18, gap: 10,
+  },
+  saveBtnText: { fontSize: 17, fontWeight: "600", letterSpacing: 0.5 },
+  skipBtn: { alignItems: "center", padding: 12 },
+  skipText: { fontSize: 13, letterSpacing: 0.5 },
+});

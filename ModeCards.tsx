@@ -1,202 +1,259 @@
 import React, { useEffect } from "react";
-import { View, Text, StyleSheet, Dimensions } from "react-native";
+import {
+  View,
+  StyleSheet,
+  Dimensions,
+  Platform,
+} from "react-native";
 import Animated, {
-  useSharedValue,
-  withTiming,
-  withDelay,
-  Easing,
   useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+  Easing,
   interpolate,
 } from "react-native-reanimated";
-import Ionicons from "@expo/vector-icons/Ionicons";
 import { useColors } from "@/hooks/useColors";
-import { SessionRecord } from "@/types";
 
 const { width } = Dimensions.get("window");
-const MAX_ITEMS = 10;
+const ORB_SIZE = Math.min(width * 0.52, 210);
 
-function RatingDot({ rating, index, color }: { rating: number; index: number; color: string }) {
-  const scale = useSharedValue(0);
+function useGyroParallax() {
+  const tiltX = useSharedValue(0);
+  const tiltY = useSharedValue(0);
+
   useEffect(() => {
-    scale.value = withDelay(
-      index * 80,
-      withTiming(1, { duration: 400, easing: Easing.out(Easing.back(2)) })
+    if (Platform.OS === "web") {
+      const handleOrientation = (e: DeviceOrientationEvent) => {
+        const x = ((e.beta ?? 0) / 45) * 10;
+        const y = ((e.gamma ?? 0) / 45) * 10;
+        tiltX.value = withTiming(Math.max(-10, Math.min(10, x)), { duration: 200 });
+        tiltY.value = withTiming(Math.max(-10, Math.min(10, y)), { duration: 200 });
+      };
+      window.addEventListener("deviceorientation", handleOrientation);
+      return () => window.removeEventListener("deviceorientation", handleOrientation);
+    } else {
+      let sub: { remove: () => void } | null = null;
+      import("expo-sensors")
+        .then(({ Gyroscope }) => {
+          Gyroscope.setUpdateInterval(60);
+          sub = Gyroscope.addListener(({ x, y }) => {
+            tiltX.value = withTiming(
+              Math.max(-14, Math.min(14, tiltX.value + x * 2.5)),
+              { duration: 120 }
+            );
+            tiltY.value = withTiming(
+              Math.max(-14, Math.min(14, tiltY.value + y * 2.5)),
+              { duration: 120 }
+            );
+          });
+        })
+        .catch(() => {});
+      return () => sub?.remove();
+    }
+  }, []);
+
+  return { tiltX, tiltY };
+}
+
+export function RadialOrb() {
+  const colors = useColors();
+  const pulse = useSharedValue(0);
+  const rotate = useSharedValue(0);
+  const innerPulse = useSharedValue(0);
+  const { tiltX, tiltY } = useGyroParallax();
+
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withTiming(1, { duration: 3200, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      true
+    );
+    rotate.value = withRepeat(
+      withTiming(360, { duration: 20000, easing: Easing.linear }),
+      -1,
+      false
+    );
+    innerPulse.value = withRepeat(
+      withTiming(1, { duration: 2000, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      true
     );
   }, []);
-  const style = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
+
+  const layer0Style = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: tiltY.value * -0.4 },
+      { translateY: tiltX.value * 0.4 },
+      { scale: interpolate(pulse.value, [0, 1], [0.95, 1.05]) },
+    ],
+    opacity: interpolate(pulse.value, [0, 1], [0.1, 0.2]),
   }));
+
+  const layer1Style = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: tiltY.value * -1 },
+      { translateY: tiltX.value * 1 },
+      { scale: interpolate(pulse.value, [0, 1], [0.97, 1.03]) },
+      { rotate: `${rotate.value}deg` },
+    ],
+    opacity: interpolate(pulse.value, [0, 1], [0.35, 0.65]),
+  }));
+
+  const layer2Style = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: tiltY.value * -1.8 },
+      { translateY: tiltX.value * 1.8 },
+      { scale: interpolate(innerPulse.value, [0, 1], [0.9, 1.0]) },
+    ],
+    opacity: interpolate(innerPulse.value, [0, 1], [0.5, 0.85]),
+  }));
+
+  const coreStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: tiltY.value * -2.5 },
+      { translateY: tiltX.value * 2.5 },
+    ],
+    opacity: interpolate(innerPulse.value, [0, 1], [0.65, 1.0]),
+  }));
+
+  const dotsStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: tiltY.value * -3 },
+      { translateY: tiltX.value * 3 },
+      { rotate: `${-rotate.value * 0.6}deg` },
+    ],
+  }));
+
+  const dotPositions = [
+    { angle: 0, dist: ORB_SIZE * 0.52 },
+    { angle: 60, dist: ORB_SIZE * 0.48 },
+    { angle: 120, dist: ORB_SIZE * 0.55 },
+    { angle: 180, dist: ORB_SIZE * 0.50 },
+    { angle: 240, dist: ORB_SIZE * 0.46 },
+    { angle: 300, dist: ORB_SIZE * 0.53 },
+  ];
+
   return (
-    <Animated.View style={[styles.dot, { backgroundColor: color + (rating > 0 ? "ff" : "20") }, style]} />
-  );
-}
+    <View style={styles.container}>
+      <Animated.View
+        style={[
+          styles.layer,
+          styles.outerRing,
+          { borderColor: colors.primary + "18" },
+          layer0Style,
+        ]}
+      />
 
-interface Props {
-  records: SessionRecord[];
-}
+      <Animated.View
+        style={[
+          styles.layer,
+          styles.midRing,
+          { borderColor: colors.primary + "40" },
+          layer1Style,
+        ]}
+      >
+        <View style={[styles.ringNotch, { backgroundColor: colors.primary + "80" }]} />
+      </Animated.View>
 
-export function RatingChart({ records }: Props) {
-  const colors = useColors();
-  const recent = [...records].slice(0, MAX_ITEMS).reverse();
-  const avgRating =
-    recent.length > 0
-      ? recent.reduce((a, r) => a + r.rating, 0) / recent.length
-      : 0;
+      <Animated.View
+        style={[
+          styles.layer,
+          styles.innerRing,
+          { borderColor: colors.secondary + "50" },
+          layer2Style,
+        ]}
+      />
 
-  const ratingColor = (r: number) =>
-    r >= 4 ? colors.accent : r >= 3 ? colors.amber : colors.secondary;
+      <Animated.View
+        style={[
+          styles.layer,
+          styles.core,
+          { backgroundColor: colors.primary + "14" },
+          coreStyle,
+        ]}
+      >
+        <View style={[styles.coreInner, { backgroundColor: colors.primary + "20" }]} />
+      </Animated.View>
 
-  return (
-    <View style={[styles.container, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <View style={styles.header}>
-        <View>
-          <Text style={[styles.title, { color: colors.foreground }]}>
-            Tendance qualité
-          </Text>
-          <Text style={[styles.sub, { color: colors.mutedForeground }]}>
-            {recent.length} dernière{recent.length !== 1 ? "s" : ""} séance{recent.length !== 1 ? "s" : ""}
-          </Text>
-        </View>
-        <View style={styles.avgBlock}>
-          <Text style={[styles.avgNum, { color: colors.accent }]}>
-            {avgRating > 0 ? avgRating.toFixed(1) : "—"}
-          </Text>
-          <View style={styles.starsRow}>
-            {[1, 2, 3, 4, 5].map((i) => (
-              <Ionicons
-                key={i}
-                name={i <= Math.round(avgRating) ? "star" : "star-outline"}
-                size={10}
-                color={colors.amber}
-              />
-            ))}
-          </View>
-        </View>
-      </View>
-
-      {recent.length === 0 ? (
-        <Text style={[styles.empty, { color: colors.mutedForeground }]}>
-          Aucune séance enregistrée
-        </Text>
-      ) : (
-        <View style={styles.timeline}>
-          {recent.map((r, i) => {
-            const dotColor = ratingColor(r.rating);
-            const date = new Date(r.completedAt).toLocaleDateString("fr-FR", {
-              day: "numeric",
-              month: "short",
-            });
-            return (
-              <View key={r.id} style={styles.item}>
-                <View style={styles.dotsCol}>
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <RatingDot
-                      key={star}
-                      rating={r.rating >= star ? 1 : 0}
-                      index={i * 5 + star}
-                      color={dotColor}
-                    />
-                  ))}
-                </View>
-                <View style={styles.itemInfo}>
-                  <Text style={[styles.itemName, { color: colors.foreground }]} numberOfLines={1}>
-                    {r.sessionName}
-                  </Text>
-                  <Text style={[styles.itemDate, { color: colors.mutedForeground }]}>
-                    {date}
-                  </Text>
-                </View>
-                <View style={styles.durationBadge}>
-                  <Text style={[styles.durationText, { color: colors.mutedForeground }]}>
-                    {Math.floor(r.duration / 60)}m
-                  </Text>
-                </View>
-              </View>
-            );
-          })}
-        </View>
-      )}
+      <Animated.View style={[styles.layer, styles.dotsLayer, dotsStyle]}>
+        {dotPositions.map((pos, i) => {
+          const rad = (pos.angle * Math.PI) / 180;
+          return (
+            <View
+              key={i}
+              style={[
+                styles.dot,
+                {
+                  backgroundColor: i % 2 === 0 ? colors.primary : colors.accent,
+                  left: ORB_SIZE / 2 + Math.cos(rad) * pos.dist - 2,
+                  top: ORB_SIZE / 2 + Math.sin(rad) * pos.dist - 2,
+                  opacity: 0.4 + (i % 3) * 0.2,
+                  width: i % 2 === 0 ? 3 : 4,
+                  height: i % 2 === 0 ? 3 : 4,
+                  borderRadius: i % 2 === 0 ? 1.5 : 2,
+                },
+              ]}
+            />
+          );
+        })}
+      </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: 20,
+    width: ORB_SIZE,
+    height: ORB_SIZE,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  layer: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  outerRing: {
+    width: ORB_SIZE,
+    height: ORB_SIZE,
+    borderRadius: ORB_SIZE / 2,
     borderWidth: 1,
-    padding: 20,
-    gap: 16,
   },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+  midRing: {
+    width: ORB_SIZE * 0.76,
+    height: ORB_SIZE * 0.76,
+    borderRadius: ORB_SIZE * 0.38,
+    borderWidth: 1.5,
   },
-  title: {
-    fontSize: 14,
-    fontWeight: "600",
-    letterSpacing: 0.5,
-  },
-  sub: {
-    fontSize: 11,
-    letterSpacing: 0.3,
-    marginTop: 2,
-  },
-  avgBlock: {
-    alignItems: "center",
-    gap: 2,
-  },
-  avgNum: {
-    fontSize: 22,
-    fontWeight: "700",
-    letterSpacing: -0.5,
-  },
-  starsRow: {
-    flexDirection: "row",
-    gap: 1,
-  },
-  empty: {
-    fontSize: 12,
-    textAlign: "center",
-    paddingVertical: 16,
-    letterSpacing: 0.3,
-  },
-  timeline: {
-    gap: 12,
-  },
-  item: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  dotsCol: {
-    flexDirection: "row",
-    gap: 2,
-  },
-  dot: {
+  ringNotch: {
+    position: "absolute",
+    top: 0,
     width: 6,
     height: 6,
     borderRadius: 3,
   },
-  itemInfo: {
-    flex: 1,
-    gap: 1,
+  innerRing: {
+    width: ORB_SIZE * 0.52,
+    height: ORB_SIZE * 0.52,
+    borderRadius: ORB_SIZE * 0.26,
+    borderWidth: 1,
   },
-  itemName: {
-    fontSize: 12,
-    fontWeight: "500",
-    letterSpacing: 0.3,
+  core: {
+    width: ORB_SIZE * 0.36,
+    height: ORB_SIZE * 0.36,
+    borderRadius: ORB_SIZE * 0.18,
   },
-  itemDate: {
-    fontSize: 10,
-    letterSpacing: 0.3,
+  coreInner: {
+    width: ORB_SIZE * 0.18,
+    height: ORB_SIZE * 0.18,
+    borderRadius: ORB_SIZE * 0.09,
   },
-  durationBadge: {
-    minWidth: 32,
-    alignItems: "flex-end",
+  dotsLayer: {
+    width: ORB_SIZE,
+    height: ORB_SIZE,
   },
-  durationText: {
-    fontSize: 11,
-    letterSpacing: 0.3,
+  dot: {
+    position: "absolute",
   },
 });

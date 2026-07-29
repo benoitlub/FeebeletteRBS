@@ -1,232 +1,300 @@
-/**
- * FractalHero — slim 52px topbar animation strip.
- * FractalOrb   — compact 64×64 animated orb for the BottomShelf.
- */
 import React, { useEffect } from "react";
-import { View, StyleSheet, Dimensions } from "react-native";
+import { View, StyleSheet, useWindowDimensions } from "react-native";
 import Animated, {
-  useSharedValue,
-  withRepeat,
-  withTiming,
-  withSequence,
-  Easing,
-  useAnimatedStyle,
-  interpolate,
+  useSharedValue, withRepeat, withTiming, withSequence, withDelay,
+  Easing, useAnimatedProps, useAnimatedStyle, interpolate,
 } from "react-native-reanimated";
+import Svg, {
+  Path, Ellipse, Circle, G, Defs, RadialGradient, Stop, Line,
+} from "react-native-svg";
 import { LinearGradient } from "expo-linear-gradient";
 
-const { width: W } = Dimensions.get("window");
+const AnimatedEllipse = Animated.createAnimatedComponent(Ellipse);
+const AnimatedPath    = Animated.createAnimatedComponent(Path);
 
-export const FRACTAL_HERO_H = 52;
+// ─── Scene geometry ───────────────────────────────────────────────────────────
+const VW   = 300;
+const VH   = 280;
+const CX   = 150;
+const APEX_Y  = 88;
+const RIM_Y   = 194;
+const RIM_RX  = 90;
+const RIM_RY  = 13;
+const STEM_W  = 11;
+const HALO_Y  = 230;
 
-// ── Fibonacci dots for the slim hero ─────────────────────────────────────────
-const PHI = Math.PI * 2 * (2 - 1.6180339887);
-const HERO_DOTS = Array.from({ length: 8 }, (_, i) => ({
-  x: W / 2 + Math.cos(i * PHI) * (Math.sqrt(i + 1) * 10),
-  y: FRACTAL_HERO_H / 2 + Math.sin(i * PHI) * (Math.sqrt(i + 1) * 4.5),
-  s: 2,
-  i,
-}));
+// Longitude lines: from apex to 7 points on the rim
+const LONG_PTS: [number, number][] = [
+  [CX - RIM_RX,          RIM_Y],
+  [CX - RIM_RX * 0.74,   RIM_Y + 4],
+  [CX - RIM_RX * 0.42,   RIM_Y + 7],
+  [CX,                   RIM_Y + RIM_RY],
+  [CX + RIM_RX * 0.42,   RIM_Y + 7],
+  [CX + RIM_RX * 0.74,   RIM_Y + 4],
+  [CX + RIM_RX,          RIM_Y],
+];
 
-// ── Slim hero topbar ──────────────────────────────────────────────────────────
-interface HeroProps {
-  primaryColor: string;
-  secondaryColor: string;
-  isDark: boolean;
-}
+// Latitude arcs (front-visible wireframe rings)
+const LAT_ARCS: [number,number,number,number,number,number][] = [
+  [CX - 28, 103, CX, 98,  CX + 28, 103],
+  [CX - 55, 124, CX, 118, CX + 55, 124],
+  [CX - 76, 149, CX, 143, CX + 76, 149],
+  [CX - 88, 174, CX, 168, CX + 88, 174],
+];
 
-export function FractalHero({ primaryColor: pc, secondaryColor: sc, isDark }: HeroProps) {
-  const gold = "#ffb700";
-  const scanX = useSharedValue(-40);
-  const pulse = useSharedValue(0);
+// Dome outline (cubic bezier, control pts high to make a full dome)
+const DOME = `M ${CX - RIM_RX} ${RIM_Y} C ${CX - RIM_RX} ${APEX_Y - 50} ${CX + RIM_RX} ${APEX_Y - 50} ${CX + RIM_RX} ${RIM_Y}`;
+
+// Fairy visual sits ABOVE the SVG, in absolute React Native space
+// We calculate where (in pixel space) the fairy lives:
+//   fairy center = roughly at VH * 0.24 from top of SVG (scaled)
+
+interface Props { primaryColor: string; isDark: boolean }
+
+export function FairyScene({ primaryColor, isDark }: Props) {
+  const { width } = useWindowDimensions();
+  const svgScale  = Math.min(width / VW, 1.22);
+  const svgW      = VW * svgScale;
+  const svgH      = VH * svgScale;
+
+  // ── Mushroom animations ──────────────────────────────────────────────────
+  const shimmer  = useSharedValue(0);
+  const haloR    = useSharedValue(0);
+
+  // ── Fairy animations ─────────────────────────────────────────────────────
+  const float    = useSharedValue(0);
+  const pulse    = useSharedValue(0);
+  const wing     = useSharedValue(0);
 
   useEffect(() => {
-    pulse.value = withRepeat(withTiming(1, { duration: 2800, easing: Easing.inOut(Easing.sin) }), -1, true);
-    scanX.value = withRepeat(
-      withSequence(
-        withTiming(W + 40, { duration: 2200, easing: Easing.inOut(Easing.quad) }),
-        withTiming(-40, { duration: 0 }),
-        withTiming(-40, { duration: 1800 }),
-      ),
-      -1, false,
-    );
+    shimmer.value = withRepeat(withSequence(
+      withTiming(1, { duration: 2200, easing: Easing.inOut(Easing.sin) }),
+      withTiming(0.3, { duration: 2200, easing: Easing.inOut(Easing.sin) }),
+    ), -1);
+
+    haloR.value = withRepeat(withSequence(
+      withTiming(1, { duration: 1900, easing: Easing.inOut(Easing.sin) }),
+      withTiming(0,  { duration: 1900, easing: Easing.inOut(Easing.sin) }),
+    ), -1);
+
+    float.value = withRepeat(withSequence(
+      withTiming(1, { duration: 2700, easing: Easing.inOut(Easing.sin) }),
+      withTiming(0, { duration: 2700, easing: Easing.inOut(Easing.sin) }),
+    ), -1);
+
+    pulse.value = withRepeat(withSequence(
+      withTiming(1, { duration: 1500, easing: Easing.inOut(Easing.sin) }),
+      withTiming(0, { duration: 1500, easing: Easing.inOut(Easing.sin) }),
+    ), -1);
+
+    wing.value = withRepeat(withSequence(
+      withTiming(1, { duration: 1700, easing: Easing.inOut(Easing.sin) }),
+      withTiming(0, { duration: 1700, easing: Easing.inOut(Easing.sin) }),
+    ), -1);
   }, []);
 
-  const scanStyle = useAnimatedStyle(() => ({ transform: [{ translateX: scanX.value }] }));
-  const dotStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(pulse.value, [0, 1], [0.15, 0.55]),
+  // Animated SVG props — mushroom shimmer
+  const shimProps = useAnimatedProps(() => ({
+    opacity: interpolate(shimmer.value, [0, 1], [0.25, 0.65]),
+  }));
+  const haloProps = useAnimatedProps(() => ({
+    rx: interpolate(haloR.value, [0, 1], [46, 64]),
+    ry: interpolate(haloR.value, [0, 1], [8,  12]),
+    opacity: interpolate(haloR.value, [0, 1], [0.85, 0.2]),
   }));
 
-  const bg: [string, string] = isDark
-    ? ["#070720", "#07071a"]
-    : ["#e8e8f4", "#eeeef8"];
+  // Fairy float
+  const fairyStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: interpolate(float.value, [0, 1], [0, -10]) }],
+  }));
+  const coreStyle = useAnimatedStyle(() => ({
+    width:  interpolate(pulse.value, [0, 1], [22, 30]),
+    height: interpolate(pulse.value, [0, 1], [22, 30]),
+    borderRadius: interpolate(pulse.value, [0, 1], [11, 15]),
+    opacity: interpolate(pulse.value, [0, 1], [0.95, 0.7]),
+  }));
+  const aura1Style = useAnimatedStyle(() => ({
+    width:  interpolate(pulse.value, [0, 1], [44, 58]),
+    height: interpolate(pulse.value, [0, 1], [44, 58]),
+    borderRadius: interpolate(pulse.value, [0, 1], [22, 29]),
+    opacity: interpolate(pulse.value, [0, 1], [0.35, 0.12]),
+  }));
+  const aura2Style = useAnimatedStyle(() => ({
+    width:  interpolate(pulse.value, [0, 1], [68, 84]),
+    height: interpolate(pulse.value, [0, 1], [68, 84]),
+    borderRadius: interpolate(pulse.value, [0, 1], [34, 42]),
+    opacity: interpolate(pulse.value, [0, 1], [0.14, 0.04]),
+  }));
+  const wingLStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(wing.value, [0, 1], [0.25, 0.65]),
+    transform: [
+      { translateX: interpolate(wing.value, [0, 1], [-26, -33]) },
+      { scaleX: interpolate(wing.value, [0, 1], [1, 1.12]) },
+    ],
+  }));
+  const wingRStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(wing.value, [0, 1], [0.25, 0.65]),
+    transform: [
+      { translateX: interpolate(wing.value, [0, 1], [26, 33]) },
+      { scaleX: interpolate(wing.value, [0, 1], [1, 1.12]) },
+    ],
+  }));
+
+  const cyan = primaryColor || "#00e5ff";
+  const viol = "#b07cff";
+
+  // Pixel position of the fairy center above the SVG
+  const fairyCenterY = (APEX_Y - 44) * svgScale;  // above dome apex
+  const fairyCenterX = svgW / 2;
 
   return (
-    <View style={styles.hero}>
-      <LinearGradient colors={bg} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+    <View style={{ width: svgW, height: svgH, alignSelf: "center" }}>
 
-      {/* Color tint strip */}
-      <LinearGradient
-        colors={[pc + "18", "transparent", gold + "0c"] as [string, string, string]}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-      />
+      {/* ── Mushroom SVG layer ── */}
+      <Svg width={svgW} height={svgH} viewBox={`0 0 ${VW} ${VH}`}>
+        <Defs>
+          <RadialGradient id="mBase" cx="50%" cy="40%" r="60%">
+            <Stop offset="0%"   stopColor={cyan} stopOpacity={0.28} />
+            <Stop offset="100%" stopColor={cyan} stopOpacity={0} />
+          </RadialGradient>
+          <RadialGradient id="halo" cx="50%" cy="50%" r="50%">
+            <Stop offset="0%"   stopColor={cyan} stopOpacity={0.95} />
+            <Stop offset="50%"  stopColor={cyan} stopOpacity={0.35} />
+            <Stop offset="100%" stopColor={cyan} stopOpacity={0} />
+          </RadialGradient>
+        </Defs>
 
-      {/* Fibonacci dots */}
-      <Animated.View style={[StyleSheet.absoluteFill, dotStyle]} pointerEvents="none">
-        {HERO_DOTS.map(({ x, y, s, i }) => (
+        {/* Ambient glow behind mushroom */}
+        <Ellipse cx={CX} cy={RIM_Y + 20} rx={110} ry={60} fill="url(#mBase)" />
+
+        {/* Stem */}
+        <Path
+          d={`M ${CX - STEM_W} ${RIM_Y + 3} L ${CX - STEM_W + 3} ${HALO_Y - 2} L ${CX + STEM_W - 3} ${HALO_Y - 2} L ${CX + STEM_W} ${RIM_Y + 3} Z`}
+          fill="none" stroke={cyan} strokeWidth={1.2} opacity={0.5}
+        />
+        <Line x1={CX} y1={RIM_Y + 3} x2={CX} y2={HALO_Y - 2}
+          stroke={cyan} strokeWidth={0.5} opacity={0.4} />
+
+        {/* Halo ring (animated pulse) */}
+        <AnimatedEllipse cx={CX} cy={HALO_Y} animatedProps={haloProps} fill="url(#halo)" />
+        <Ellipse cx={CX} cy={HALO_Y} rx={46} ry={8}
+          fill="none" stroke={cyan} strokeWidth={1.6} opacity={0.9} />
+
+        {/* Rim ellipse */}
+        <Ellipse cx={CX} cy={RIM_Y} rx={RIM_RX} ry={RIM_RY}
+          fill="none" stroke={cyan} strokeWidth={1.2} opacity={0.75} />
+
+        {/* Dome outline (animated shimmer) */}
+        <AnimatedPath d={DOME} fill="none" stroke={cyan} strokeWidth={1.5}
+          animatedProps={shimProps} />
+
+        {/* Latitude rings */}
+        {LAT_ARCS.map(([x1, y1, cpX, cpY, x2, y2], i) => (
+          <AnimatedPath
+            key={i}
+            d={`M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}`}
+            fill="none" stroke={cyan} strokeWidth={0.8}
+            animatedProps={shimProps}
+          />
+        ))}
+
+        {/* Longitude lines */}
+        {LONG_PTS.map(([tx, ty], i) => (
+          <AnimatedPath
+            key={i}
+            d={`M ${CX} ${APEX_Y} L ${tx} ${ty}`}
+            fill="none" stroke={cyan} strokeWidth={0.7}
+            animatedProps={shimProps}
+          />
+        ))}
+      </Svg>
+
+      {/* ── Fairy layer (absolute, over SVG) ── */}
+      <Animated.View
+        style={[
+          styles.fairyAnchor,
+          { top: fairyCenterY, left: fairyCenterX },
+          fairyStyle,
+        ]}
+      >
+        {/* Outer aura */}
+        <Animated.View style={[styles.fairyAura, { backgroundColor: viol }, aura2Style]} />
+        {/* Inner aura */}
+        <Animated.View style={[styles.fairyAura, { backgroundColor: viol + "cc" }, aura1Style]} />
+
+        {/* Wings */}
+        <Animated.View style={[styles.wing, styles.wingLeft, { backgroundColor: viol }, wingLStyle]} />
+        <Animated.View style={[styles.wing, styles.wingRight, { backgroundColor: viol }, wingRStyle]} />
+
+        {/* Core glow */}
+        <Animated.View style={[styles.fairyCore, coreStyle]}>
+          <LinearGradient
+            colors={["#f0d8ff", viol, "#8040cc"]}
+            style={StyleSheet.absoluteFill}
+            start={{ x: 0.2, y: 0 }} end={{ x: 0.8, y: 1 }}
+          />
+        </Animated.View>
+
+        {/* Highlight */}
+        <View style={styles.fairyHighlight} />
+
+        {/* Sparkle dots */}
+        {SPARKS.map(([dx, dy], i) => (
           <View
             key={i}
-            style={{
-              position: "absolute", width: s, height: s, borderRadius: s / 2,
-              backgroundColor: i % 3 === 0 ? gold : i % 3 === 1 ? pc : sc,
-              left: x - s / 2, top: y - s / 2,
-              opacity: 0.3 + i * 0.08,
-            }}
+            style={[styles.spark, { left: dx, top: dy, opacity: 0.4 + (i % 3) * 0.18 }]}
           />
         ))}
       </Animated.View>
-
-      {/* Yugop scan line — horizontal neon beam */}
-      <Animated.View
-        style={[{ position: "absolute", top: 0, bottom: 0, left: 0, width: 36 }, scanStyle]}
-        pointerEvents="none"
-      >
-        <LinearGradient
-          colors={["transparent", pc + "60", pc + "c0", pc + "60", "transparent"] as [string, string, string, string, string]}
-          style={{ flex: 1 }}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-        />
-      </Animated.View>
-
-      {/* Bottom border line */}
-      <View style={[styles.borderLine, { backgroundColor: pc + "30" }]} />
     </View>
   );
 }
 
-// ── FractalOrb — compact 64×64 orb for BottomShelf ────────────────────────────
-interface OrbProps {
-  size?: number;
-  primaryColor: string;
-  secondaryColor: string;
-}
-
-export function FractalOrb({ size = 64, primaryColor: pc, secondaryColor: sc }: OrbProps) {
-  const gold = "#ffb700";
-  const C = size / 2;
-  const pulse = useSharedValue(0);
-  const rot1  = useSharedValue(0);
-  const rot2  = useSharedValue(0);
-  const exp   = useSharedValue(0);
-  const aura  = useSharedValue(0);
-
-  useEffect(() => {
-    pulse.value = withRepeat(withTiming(1, { duration: 2600, easing: Easing.inOut(Easing.sin) }), -1, true);
-    rot1.value  = withRepeat(withTiming(360,  { duration: 14000, easing: Easing.linear }), -1, false);
-    rot2.value  = withRepeat(withTiming(-360, { duration: 22000, easing: Easing.linear }), -1, false);
-    aura.value  = withRepeat(withTiming(1, { duration: 2200, easing: Easing.inOut(Easing.sin) }), -1, true);
-    exp.value   = withRepeat(
-      withSequence(withTiming(1, { duration: 1800, easing: Easing.out(Easing.quad) }), withTiming(0, { duration: 0 })),
-      -1, false,
-    );
-  }, []);
-
-  const orbStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: interpolate(pulse.value, [0, 1], [0.82, 1.22]) }],
-    opacity:    interpolate(pulse.value, [0, 1], [0.70, 1.00]),
-  }));
-  const r1Style = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rot1.value}deg` }],
-    opacity: interpolate(pulse.value, [0, 1], [0.18, 0.55]),
-  }));
-  const r2Style = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rot2.value}deg` }],
-    opacity: interpolate(pulse.value, [0, 1], [0.12, 0.32]),
-  }));
-  const expStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: interpolate(exp.value, [0, 1], [0.1, 2.0]) }],
-    opacity:   interpolate(exp.value, [0, 0.15, 1], [0.80, 0.50, 0]),
-  }));
-  const aura1Style = useAnimatedStyle(() => ({
-    opacity: interpolate(aura.value, [0, 1], [0.30, 0.90]),
-    transform: [{ scaleX: interpolate(aura.value, [0, 1], [0.90, 1.10]) }],
-  }));
-
-  const ORB  = size * 0.21;
-  const R1   = size * 0.33;
-  const R2   = size * 0.43;
-
-  return (
-    <View style={{ width: size, height: size }}>
-      {/* 3D ring 1 */}
-      <Animated.View
-        style={[{
-          position: "absolute", left: C - R1, top: C - R1 * 0.28,
-          width: R1 * 2, height: R1 * 0.56, borderRadius: R1,
-          borderWidth: 0.8, borderColor: pc + "55",
-          transform: [{ perspective: 280 }, { rotateX: "72deg" }],
-        }, r1Style]}
-      />
-      {/* 3D ring 2 */}
-      <Animated.View
-        style={[{
-          position: "absolute", left: C - R2, top: C - R2 * 0.25,
-          width: R2 * 2, height: R2 * 0.50, borderRadius: R2,
-          borderWidth: 0.6, borderColor: gold + "40",
-          transform: [{ perspective: 280 }, { rotateX: "72deg" }],
-        }, r2Style]}
-      />
-
-      {/* Expand pulse ring */}
-      <Animated.View
-        style={[{
-          position: "absolute", left: C - ORB * 1.5, top: C - ORB * 1.5,
-          width: ORB * 3, height: ORB * 3, borderRadius: ORB * 1.5,
-          borderWidth: 1, borderColor: pc + "80",
-        }, expStyle]}
-      />
-
-      {/* Holo aura base */}
-      <Animated.View
-        style={[{
-          position: "absolute",
-          left: C - size * 0.30, top: C + size * 0.12,
-          width: size * 0.60, height: size * 0.12, borderRadius: size * 0.30,
-          borderWidth: 1, borderColor: pc + "cc",
-          backgroundColor: pc + "18",
-        }, aura1Style]}
-      />
-
-      {/* Static ambient ring */}
-      <View
-        style={{
-          position: "absolute", left: C - R1 * 1.1, top: C - R1 * 1.1,
-          width: R1 * 2.2, height: R1 * 2.2, borderRadius: R1 * 1.1,
-          borderWidth: 0.5, borderColor: pc + "20",
-        }}
-      />
-
-      {/* Central orb */}
-      <Animated.View
-        style={[{
-          position: "absolute", left: C - ORB, top: C - ORB,
-          width: ORB * 2, height: ORB * 2, borderRadius: ORB,
-        }, orbStyle]}
-      >
-        <LinearGradient
-          colors={[pc, gold] as [string, string]}
-          style={[StyleSheet.absoluteFill, { borderRadius: ORB }]}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        />
-      </Animated.View>
-    </View>
-  );
-}
+const SPARKS: [number, number][] = [
+  [-26, -12], [24, -8], [-16, 18], [22, 16], [2, -24], [-8, 26],
+];
 
 const styles = StyleSheet.create({
-  hero: { width: "100%", height: FRACTAL_HERO_H, overflow: "hidden" },
-  borderLine: { position: "absolute", bottom: 0, left: 0, right: 0, height: 1 },
+  fairyAnchor: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+    transform: [{ translateX: -42 }, { translateY: -42 }],
+    width: 84,
+    height: 84,
+  },
+  fairyAura: {
+    position: "absolute",
+    alignSelf: "center",
+  },
+  fairyCore: {
+    position: "absolute",
+    overflow: "hidden",
+  },
+  fairyHighlight: {
+    position: "absolute",
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#ffffff",
+    opacity: 0.7,
+    top: 10,
+    left: 14,
+  },
+  wing: {
+    position: "absolute",
+    width: 30,
+    height: 22,
+    borderRadius: 14,
+    top: 24,
+  },
+  wingLeft:  { borderTopRightRadius: 3, borderBottomRightRadius: 3 },
+  wingRight: { borderTopLeftRadius: 3,  borderBottomLeftRadius: 3 },
+  spark: {
+    position: "absolute",
+    width: 3,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#e0c0ff",
+  },
 });

@@ -1,380 +1,232 @@
+/**
+ * FractalHero — slim 52px topbar animation strip.
+ * FractalOrb   — compact 64×64 animated orb for the BottomShelf.
+ */
 import React, { useEffect } from "react";
-import { View, StyleSheet, Dimensions, Platform } from "react-native";
+import { View, StyleSheet, Dimensions } from "react-native";
 import Animated, {
-  useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withTiming,
   withSequence,
   Easing,
+  useAnimatedStyle,
   interpolate,
 } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
 
-const { width: W, height: H } = Dimensions.get("window");
+const { width: W } = Dimensions.get("window");
 
-interface Props {
-  colors: string[];
-  intensity: number;
-  breathDuration: number;
-}
+export const FRACTAL_HERO_H = 52;
 
-function vivify(hex: string): string {
-  if (!hex || hex.length < 7) return hex;
-  try {
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    const mx = Math.max(r, g, b);
-    if (mx < 180) {
-      const s = Math.max(3.5, 200 / Math.max(mx, 1));
-      return `#${Math.min(255, Math.round(r * s + 18)).toString(16).padStart(2, "0")}${Math.min(255, Math.round(g * s + 12)).toString(16).padStart(2, "0")}${Math.min(255, Math.round(b * s + 28)).toString(16).padStart(2, "0")}`;
-    }
-  } catch (_) {}
-  return hex;
-}
-
-// ── Floating orb ──────────────────────────────────────────────────────────────
-function FloatingOrb({ x, y, size, color, speed, delay }: {
-  x: number; y: number; size: number; color: string; speed: number; delay: number;
-}) {
-  const a = useSharedValue(0);
-  useEffect(() => {
-    const t = setTimeout(() => {
-      a.value = withRepeat(withTiming(1, { duration: speed, easing: Easing.inOut(Easing.sin) }), -1, true);
-    }, delay);
-    return () => clearTimeout(t);
-  }, []);
-  const style = useAnimatedStyle(() => ({
-    opacity: interpolate(a.value, [0, 0.5, 1], [0.50, 0.82, 0.50]),
-    transform: [
-      { translateX: interpolate(a.value, [0, 1], [-26, 26]) },
-      { translateY: interpolate(a.value, [0, 1], [-40, 40]) },
-      { scale:      interpolate(a.value, [0, 0.5, 1], [0.80, 1.20, 0.80]) },
-    ],
-  }));
-  return (
-    <Animated.View
-      style={[
-        { position: "absolute", left: x, top: y, width: size, height: size, borderRadius: size / 2, backgroundColor: color },
-        style,
-      ]}
-    />
-  );
-}
-
-// ── 3D Vortex Tunnel ─────────────────────────────────────────────────────────
-const CX = W / 2;
-const CY = H * 0.42;
-const VORTEX_RINGS = Array.from({ length: 11 }, (_, i) => ({
-  r: 20 + i * 20,
-  alpha: Math.max(14, 68 - i * 5),
-  lw: i === 0 ? 1.2 : 0.7,
+// ── Fibonacci dots for the slim hero ─────────────────────────────────────────
+const PHI = Math.PI * 2 * (2 - 1.6180339887);
+const HERO_DOTS = Array.from({ length: 8 }, (_, i) => ({
+  x: W / 2 + Math.cos(i * PHI) * (Math.sqrt(i + 1) * 10),
+  y: FRACTAL_HERO_H / 2 + Math.sin(i * PHI) * (Math.sqrt(i + 1) * 4.5),
+  s: 2,
+  i,
 }));
 
-function VortexTunnel({ color }: { color: string }) {
-  const rot  = useSharedValue(0);
-  const rot2 = useSharedValue(0);
-  const px   = useSharedValue(0);
-  const py   = useSharedValue(0);
-
-  useEffect(() => {
-    rot.value  = withRepeat(withTiming(360,  { duration: 9000,  easing: Easing.linear }), -1, false);
-    rot2.value = withRepeat(withTiming(-360, { duration: 14000, easing: Easing.linear }), -1, false);
-  }, []);
-
-  useEffect(() => {
-    if (Platform.OS === "web") {
-      if (typeof window === "undefined") return;
-      const onM = (e: any) => {
-        const ax = e.accelerationIncludingGravity?.x ?? 0;
-        const ay = e.accelerationIncludingGravity?.y ?? 0;
-        px.value = withTiming((ax / 9.81) * 12, { duration: 200 });
-        py.value = withTiming((-ay / 9.81) * 12, { duration: 200 });
-      };
-      window.addEventListener("devicemotion", onM);
-      return () => window.removeEventListener("devicemotion", onM);
-    }
-    let sub: { remove: () => void } | null = null;
-    import("expo-sensors").then(({ Accelerometer }) => {
-      Accelerometer.setUpdateInterval(80);
-      sub = Accelerometer.addListener(({ x, y }) => {
-        px.value = withTiming(x * -12, { duration: 200 });
-        py.value = withTiming(y * 12, { duration: 200 });
-      });
-    }).catch(() => {});
-    return () => sub?.remove();
-  }, []);
-
-  const disc1 = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: px.value * 0.5 }, { translateY: py.value * 0.5 },
-      { perspective: 360 }, { rotateX: "68deg" },
-      { rotate: `${rot.value}deg` },
-    ],
-  }));
-  const disc2 = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: px.value * 0.85 }, { translateY: py.value * 0.85 },
-      { perspective: 360 }, { rotateX: "68deg" },
-      { rotate: `${rot2.value}deg` },
-    ],
-  }));
-
-  return (
-    <>
-      <Animated.View style={[{ position: "absolute", left: CX, top: CY, width: 0, height: 0 }, disc1]}>
-        {VORTEX_RINGS.map(({ r, alpha, lw }, i) => (
-          <View key={i} style={{
-            position: "absolute", width: r * 2, height: r * 2, borderRadius: r,
-            borderWidth: lw,
-            borderColor: color + alpha.toString(16).padStart(2, "0"),
-            left: -r, top: -r,
-          }} />
-        ))}
-      </Animated.View>
-      <Animated.View style={[{ position: "absolute", left: CX, top: CY, width: 0, height: 0 }, disc2]}>
-        {VORTEX_RINGS.filter((_, i) => i % 2 === 0).map(({ r, lw }, i) => (
-          <View key={i} style={{
-            position: "absolute", width: r * 2, height: r * 2, borderRadius: r,
-            borderWidth: lw * 0.55, borderColor: "#ffb70020",
-            left: -r, top: -r,
-          }} />
-        ))}
-      </Animated.View>
-    </>
-  );
+// ── Slim hero topbar ──────────────────────────────────────────────────────────
+interface HeroProps {
+  primaryColor: string;
+  secondaryColor: string;
+  isDark: boolean;
 }
 
-// ── Holographic vertical scan sweep ───────────────────────────────────────────
-function HolographicScan({ color }: { color: string }) {
-  const x = useSharedValue(-50);
+export function FractalHero({ primaryColor: pc, secondaryColor: sc, isDark }: HeroProps) {
+  const gold = "#ffb700";
+  const scanX = useSharedValue(-40);
+  const pulse = useSharedValue(0);
+
   useEffect(() => {
-    x.value = withRepeat(
+    pulse.value = withRepeat(withTiming(1, { duration: 2800, easing: Easing.inOut(Easing.sin) }), -1, true);
+    scanX.value = withRepeat(
       withSequence(
-        withTiming(W + 50, { duration: 3200, easing: Easing.inOut(Easing.quad) }),
-        withTiming(-50, { duration: 0 }),
-        withTiming(-50, { duration: 2200 }), // pause
+        withTiming(W + 40, { duration: 2200, easing: Easing.inOut(Easing.quad) }),
+        withTiming(-40, { duration: 0 }),
+        withTiming(-40, { duration: 1800 }),
       ),
       -1, false,
     );
   }, []);
-  const style = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
+
+  const scanStyle = useAnimatedStyle(() => ({ transform: [{ translateX: scanX.value }] }));
+  const dotStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(pulse.value, [0, 1], [0.15, 0.55]),
+  }));
+
+  const bg: [string, string] = isDark
+    ? ["#070720", "#07071a"]
+    : ["#e8e8f4", "#eeeef8"];
+
   return (
-    <Animated.View
-      style={[{ position: "absolute", top: 0, bottom: 0, left: 0, width: 50 }, style]}
-      pointerEvents="none"
-    >
+    <View style={styles.hero}>
+      <LinearGradient colors={bg} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+
+      {/* Color tint strip */}
       <LinearGradient
-        colors={["transparent", color + "40", color + "15", "transparent"] as [string, string, string, string]}
-        style={{ flex: 1 }}
+        colors={[pc + "18", "transparent", gold + "0c"] as [string, string, string]}
+        style={StyleSheet.absoluteFill}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
       />
-    </Animated.View>
+
+      {/* Fibonacci dots */}
+      <Animated.View style={[StyleSheet.absoluteFill, dotStyle]} pointerEvents="none">
+        {HERO_DOTS.map(({ x, y, s, i }) => (
+          <View
+            key={i}
+            style={{
+              position: "absolute", width: s, height: s, borderRadius: s / 2,
+              backgroundColor: i % 3 === 0 ? gold : i % 3 === 1 ? pc : sc,
+              left: x - s / 2, top: y - s / 2,
+              opacity: 0.3 + i * 0.08,
+            }}
+          />
+        ))}
+      </Animated.View>
+
+      {/* Yugop scan line — horizontal neon beam */}
+      <Animated.View
+        style={[{ position: "absolute", top: 0, bottom: 0, left: 0, width: 36 }, scanStyle]}
+        pointerEvents="none"
+      >
+        <LinearGradient
+          colors={["transparent", pc + "60", pc + "c0", pc + "60", "transparent"] as [string, string, string, string, string]}
+          style={{ flex: 1 }}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+        />
+      </Animated.View>
+
+      {/* Bottom border line */}
+      <View style={[styles.borderLine, { backgroundColor: pc + "30" }]} />
+    </View>
   );
 }
 
-// ── Holographic projection base (aura at bottom) ──────────────────────────────
-function ProjectionBase({ color }: { color: string }) {
+// ── FractalOrb — compact 64×64 orb for BottomShelf ────────────────────────────
+interface OrbProps {
+  size?: number;
+  primaryColor: string;
+  secondaryColor: string;
+}
+
+export function FractalOrb({ size = 64, primaryColor: pc, secondaryColor: sc }: OrbProps) {
+  const gold = "#ffb700";
+  const C = size / 2;
   const pulse = useSharedValue(0);
+  const rot1  = useSharedValue(0);
+  const rot2  = useSharedValue(0);
+  const exp   = useSharedValue(0);
+  const aura  = useSharedValue(0);
+
   useEffect(() => {
     pulse.value = withRepeat(withTiming(1, { duration: 2600, easing: Easing.inOut(Easing.sin) }), -1, true);
-  }, []);
-  const s1 = useAnimatedStyle(() => ({
-    opacity: interpolate(pulse.value, [0, 1], [0.20, 0.55]),
-    transform: [{ scaleX: interpolate(pulse.value, [0, 1], [0.90, 1.10]) }],
-  }));
-  const s2 = useAnimatedStyle(() => ({
-    opacity: interpolate(pulse.value, [0, 1], [0.10, 0.30]),
-    transform: [{ scaleX: interpolate(pulse.value, [0, 1], [0.85, 1.15]) }],
-  }));
-  const CY_BASE = H * 0.78;
-  return (
-    <>
-      <Animated.View style={[{
-        position: "absolute", left: CX - 80, top: CY_BASE,
-        width: 160, height: 20, borderRadius: 80,
-        borderWidth: 1.2, borderColor: color + "cc",
-        backgroundColor: color + "15",
-      }, s1]} pointerEvents="none" />
-      <Animated.View style={[{
-        position: "absolute", left: CX - 110, top: CY_BASE + 6,
-        width: 220, height: 28, borderRadius: 110,
-        borderWidth: 0.6, borderColor: color + "60",
-      }, s2]} pointerEvents="none" />
-    </>
-  );
-}
-
-// ── Mandala ───────────────────────────────────────────────────────────────────
-const R1 = Math.min(W, H) * 0.37;
-const R2 = R1 * 0.63;
-const R3 = R2 * 0.55;
-
-const RING1 = Array.from({ length: 12 }, (_, i) => ({ a: (i * 30) * Math.PI / 180 }));
-const RING2 = Array.from({ length: 8 },  (_, i) => ({ a: (i * 45) * Math.PI / 180 }));
-const RING3 = Array.from({ length: 6 },  (_, i) => ({ a: (i * 60) * Math.PI / 180 }));
-
-function MandalaLayer({ color, intensity }: { color: string; intensity: number }) {
-  const r1 = useSharedValue(0);
-  const r2 = useSharedValue(0);
-  const r3 = useSharedValue(0);
-  const pl = useSharedValue(0);
-
-  useEffect(() => {
-    r1.value = withRepeat(withTiming(360,  { duration: 80000, easing: Easing.linear }), -1, false);
-    r2.value = withRepeat(withTiming(-360, { duration: 52000, easing: Easing.linear }), -1, false);
-    r3.value = withRepeat(withTiming(360,  { duration: 30000, easing: Easing.linear }), -1, false);
-    pl.value = withRepeat(withTiming(1,    { duration: 4200,  easing: Easing.inOut(Easing.sin) }), -1, true);
+    rot1.value  = withRepeat(withTiming(360,  { duration: 14000, easing: Easing.linear }), -1, false);
+    rot2.value  = withRepeat(withTiming(-360, { duration: 22000, easing: Easing.linear }), -1, false);
+    aura.value  = withRepeat(withTiming(1, { duration: 2200, easing: Easing.inOut(Easing.sin) }), -1, true);
+    exp.value   = withRepeat(
+      withSequence(withTiming(1, { duration: 1800, easing: Easing.out(Easing.quad) }), withTiming(0, { duration: 0 })),
+      -1, false,
+    );
   }, []);
 
-  const s1 = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${r1.value}deg` }],
-    opacity: interpolate(pl.value, [0, 1], [0.20, 0.48]) * Math.min(1, intensity * 1.4),
+  const orbStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: interpolate(pulse.value, [0, 1], [0.82, 1.22]) }],
+    opacity:    interpolate(pulse.value, [0, 1], [0.70, 1.00]),
   }));
-  const s2 = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${r2.value}deg` }],
-    opacity: interpolate(pl.value, [0, 1], [0.16, 0.40]) * Math.min(1, intensity * 1.4),
+  const r1Style = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rot1.value}deg` }],
+    opacity: interpolate(pulse.value, [0, 1], [0.18, 0.55]),
   }));
-  const s3 = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${r3.value}deg` }],
-    opacity: interpolate(pl.value, [0, 1], [0.25, 0.55]) * Math.min(1, intensity * 1.4),
+  const r2Style = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rot2.value}deg` }],
+    opacity: interpolate(pulse.value, [0, 1], [0.12, 0.32]),
   }));
-  const pulseS = useAnimatedStyle(() => ({
-    opacity: interpolate(pl.value, [0, 1], [0.05, 0.20]),
-    transform: [{ scale: interpolate(pl.value, [0, 1], [0.92, 1.08]) }],
+  const expStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: interpolate(exp.value, [0, 1], [0.1, 2.0]) }],
+    opacity:   interpolate(exp.value, [0, 0.15, 1], [0.80, 0.50, 0]),
+  }));
+  const aura1Style = useAnimatedStyle(() => ({
+    opacity: interpolate(aura.value, [0, 1], [0.30, 0.90]),
+    transform: [{ scaleX: interpolate(aura.value, [0, 1], [0.90, 1.10]) }],
   }));
 
-  const dot = (a: number, r: number, sz: number) => ({
-    left: Math.cos(a) * r - sz / 2,
-    top:  Math.sin(a) * r - sz / 2,
-    width: sz, height: sz, borderRadius: sz / 2,
-  });
+  const ORB  = size * 0.21;
+  const R1   = size * 0.33;
+  const R2   = size * 0.43;
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {[R1, R2, R3].map((r, i) => (
-        <Animated.View
-          key={i}
-          style={[{ position: "absolute", left: CX - r, top: CY - r, width: r * 2, height: r * 2, borderRadius: r, borderWidth: 0.7, borderColor: color + "50" }, pulseS]}
-        />
-      ))}
-      <Animated.View style={[{ position: "absolute", left: CX, top: CY, width: 0, height: 0 }, s1]}>
-        {RING1.map(({ a }, i) => (
-          <View key={i} style={[{ position: "absolute", backgroundColor: color + "88" }, dot(a, R1, i % 3 === 0 ? 5 : 3)]} />
-        ))}
-        {RING1.map(({ a }, i) => (
-          <View key={`t${i}`} style={{
-            position: "absolute", width: 1, height: 12, backgroundColor: color + "30",
-            left: Math.cos(a) * (R1 - 9) - 0.5, top: Math.sin(a) * (R1 - 9) - 6,
-            transform: [{ rotate: `${(a * 180 / Math.PI) + 90}deg` }],
-          }} />
-        ))}
-      </Animated.View>
-      <Animated.View style={[{ position: "absolute", left: CX, top: CY, width: 0, height: 0 }, s2]}>
-        {RING2.map(({ a }, i) => (
-          <View key={i} style={{
-            position: "absolute", width: 7, height: 22, borderRadius: 3.5, backgroundColor: color + "55",
-            left: Math.cos(a) * R2 - 3.5, top: Math.sin(a) * R2 - 11,
-            transform: [{ rotate: `${(a * 180 / Math.PI) - 90}deg` }],
-          }} />
-        ))}
-      </Animated.View>
-      <Animated.View style={[{ position: "absolute", left: CX, top: CY, width: 0, height: 0 }, s3]}>
-        {RING3.map(({ a }, i) => (
-          <View key={i} style={{
-            position: "absolute", width: 4, height: 18, borderRadius: 2, backgroundColor: color + "80",
-            left: Math.cos(a) * R3 - 2, top: Math.sin(a) * R3 - 9,
-            transform: [{ rotate: `${(a * 180 / Math.PI) - 90}deg` }],
-          }} />
-        ))}
-        {[0, 60, 120].map((d) => (
-          <View key={d} style={{
-            position: "absolute", width: R3 * 1.6, height: 0.8, backgroundColor: color + "25",
-            left: -R3 * 0.8, top: -0.4, transform: [{ rotate: `${d}deg` }],
-          }} />
-        ))}
-      </Animated.View>
-    </View>
-  );
-}
-
-// ── Main export ────────────────────────────────────────────────────────────────
-export function ChromaticDisplay({ colors: sessionColors, intensity, breathDuration }: Props) {
-  const breathAnim = useSharedValue(0);
-  const ringAnim   = useSharedValue(0);
-
-  const safe = sessionColors.length >= 4 ? sessionColors : ["#080020", "#160048", "#0a0038", "#080020"];
-  const c0 = vivify(safe[0]!);
-  const c1 = vivify(safe[1]!);
-  const c2 = vivify(safe[2]!);
-  const c3 = vivify(safe[3]!);
-
-  useEffect(() => {
-    breathAnim.value = withRepeat(withTiming(1, { duration: breathDuration * 1000, easing: Easing.inOut(Easing.sin) }), -1, true);
-    ringAnim.value   = withRepeat(withTiming(1, { duration: 4400, easing: Easing.inOut(Easing.sin) }), -1, true);
-  }, [breathDuration]);
-
-  const overlayStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(breathAnim.value, [0, 1], [0.58, Math.min(0.95, 0.82 * intensity)]),
-  }));
-  const ringStyle = useAnimatedStyle(() => ({
-    opacity:    interpolate(ringAnim.value, [0, 1], [0.14, 0.46]),
-    transform: [{ scale: interpolate(ringAnim.value, [0, 1], [0.86, 1.14]) }],
-  }));
-
-  const orbs = [
-    { x: -80,       y: H * 0.03, size: 330, color: c1, speed: 5400, delay: 0 },
-    { x: W - 190,   y: H * 0.20, size: 275, color: c0, speed: 6800, delay: 700 },
-    { x: W * 0.17,  y: H * 0.50, size: 305, color: c2, speed: 5800, delay: 1400 },
-    { x: -40,       y: H * 0.63, size: 225, color: c3, speed: 8200, delay: 350 },
-    { x: W * 0.52,  y: H * 0.07, size: 190, color: c1, speed: 4600, delay: 1900 },
-  ];
-
-  return (
-    <View style={StyleSheet.absoluteFill}>
-      {/* Base gradient */}
-      <LinearGradient
-        colors={["#07052e", c1, "#070710"] as [string, string, string]}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
+    <View style={{ width: size, height: size }}>
+      {/* 3D ring 1 */}
+      <Animated.View
+        style={[{
+          position: "absolute", left: C - R1, top: C - R1 * 0.28,
+          width: R1 * 2, height: R1 * 0.56, borderRadius: R1,
+          borderWidth: 0.8, borderColor: pc + "55",
+          transform: [{ perspective: 280 }, { rotateX: "72deg" }],
+        }, r1Style]}
       />
-      {orbs.map((o, i) => <FloatingOrb key={i} {...o} />)}
+      {/* 3D ring 2 */}
+      <Animated.View
+        style={[{
+          position: "absolute", left: C - R2, top: C - R2 * 0.25,
+          width: R2 * 2, height: R2 * 0.50, borderRadius: R2,
+          borderWidth: 0.6, borderColor: gold + "40",
+          transform: [{ perspective: 280 }, { rotateX: "72deg" }],
+        }, r2Style]}
+      />
 
-      {/* Breath-synced color wash */}
-      <Animated.View style={[StyleSheet.absoluteFill, overlayStyle]}>
+      {/* Expand pulse ring */}
+      <Animated.View
+        style={[{
+          position: "absolute", left: C - ORB * 1.5, top: C - ORB * 1.5,
+          width: ORB * 3, height: ORB * 3, borderRadius: ORB * 1.5,
+          borderWidth: 1, borderColor: pc + "80",
+        }, expStyle]}
+      />
+
+      {/* Holo aura base */}
+      <Animated.View
+        style={[{
+          position: "absolute",
+          left: C - size * 0.30, top: C + size * 0.12,
+          width: size * 0.60, height: size * 0.12, borderRadius: size * 0.30,
+          borderWidth: 1, borderColor: pc + "cc",
+          backgroundColor: pc + "18",
+        }, aura1Style]}
+      />
+
+      {/* Static ambient ring */}
+      <View
+        style={{
+          position: "absolute", left: C - R1 * 1.1, top: C - R1 * 1.1,
+          width: R1 * 2.2, height: R1 * 2.2, borderRadius: R1 * 1.1,
+          borderWidth: 0.5, borderColor: pc + "20",
+        }}
+      />
+
+      {/* Central orb */}
+      <Animated.View
+        style={[{
+          position: "absolute", left: C - ORB, top: C - ORB,
+          width: ORB * 2, height: ORB * 2, borderRadius: ORB,
+        }, orbStyle]}
+      >
         <LinearGradient
-          colors={[c1 + "a8", "transparent", c0 + "88"] as [string, string, string]}
-          style={StyleSheet.absoluteFill}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
+          colors={[pc, gold] as [string, string]}
+          style={[StyleSheet.absoluteFill, { borderRadius: ORB }]}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
         />
       </Animated.View>
-
-      {/* Breathing ring */}
-      <Animated.View style={[{
-        position: "absolute",
-        borderColor: c0 + "88",
-        left: W * 0.5 - H * 0.27, top: H * 0.5 - H * 0.27,
-        width: H * 0.54, height: H * 0.54, borderRadius: H * 0.27,
-        borderWidth: 1,
-      }, ringStyle]} />
-
-      {/* 3D Vortex Tunnel */}
-      <VortexTunnel color={c1} />
-
-      {/* Holographic vertical scan sweep */}
-      <HolographicScan color={c1} />
-
-      {/* Projection base (holographic aura at bottom) */}
-      <ProjectionBase color={c1} />
-
-      {/* Mandala sacred geometry */}
-      <MandalaLayer color={c1} intensity={intensity} />
     </View>
   );
 }
 
-const styles = StyleSheet.create({});
+const styles = StyleSheet.create({
+  hero: { width: "100%", height: FRACTAL_HERO_H, overflow: "hidden" },
+  borderLine: { position: "absolute", bottom: 0, left: 0, right: 0, height: 1 },
+});
